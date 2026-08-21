@@ -1,5 +1,5 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { supabase } from "@/lib/supabase";
 import { PageShell } from "@/components/PageShell";
 
@@ -7,36 +7,55 @@ export const Route = createFileRoute("/login")({
   component: LoginPage,
 });
 
+// รายชื่ออีเมลที่เป็น Admin (ใส่เพิ่มได้ตามต้องการ)
+const ADMIN_EMAILS = [
+  "ttanasak@gmail.com",
+  "redpinkcosmetic@gmail.com"
+];
+
 function LoginPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
-  const [errorMsg, setErrorMsg] = useState(""); // เพิ่มตัวแปรเก็บข้อความ Error
+  const [errorMsg, setErrorMsg] = useState("");
   const navigate = useNavigate();
+
+  // ตรวจสอบว่าผู้ใช้ล็อกอินอยู่แล้วหรือไม่ ถ้ามีให้พาไปหน้าปลายทางทันที
+  useEffect(() => {
+    const checkActiveSession = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session?.user?.email) {
+        const userEmail = session.user.email.toLowerCase();
+        if (ADMIN_EMAILS.includes(userEmail)) {
+          navigate({ to: "/admin" });
+        } else {
+          navigate({ to: "/" });
+        }
+      }
+    };
+
+    checkActiveSession();
+  }, [navigate]);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
-    setErrorMsg(""); // ล้างข้อความ Error เก่าก่อน
+    setErrorMsg("");
 
     try {
-      // 1. ส่งข้อมูลไปถาม Supabase
+      const cleanEmail = email.trim().toLowerCase();
       const { data, error } = await supabase.auth.signInWithPassword({
-        email,
+        email: cleanEmail,
         password,
       });
 
       if (error) {
-        // ถ้าล็อกอินไม่ผ่าน (รหัสผิด / ไม่มีเมลนี้)
         setErrorMsg("เข้าสู่ระบบไม่สำเร็จ: " + error.message);
-      } else {
-        // 2. ถ้าล็อกอินผ่าน เช็คว่าเป็น Admin หรือไม่
-        if (email === "ttanasak@gmail.com") {
-          // ถ้าเป็น Admin พาเข้าหน้า Dashboard
+      } else if (data?.user?.email) {
+        if (ADMIN_EMAILS.includes(cleanEmail)) {
           navigate({ to: "/admin" });
         } else {
-          // ถ้าเป็นนักเรียน พาไปหน้าแรกเพื่อเริ่มทำข้อสอบ
-          navigate({ to: "/" }); 
+          navigate({ to: "/" });
         }
       }
     } catch (err: any) {
@@ -55,7 +74,6 @@ function LoginPage() {
             <p className="mt-2 text-sm text-slate-500">ระบบคลังสอบ Exam Vault</p>
           </div>
 
-          {/* กล่องแสดงแจ้งเตือน Error สีแดง (ถ้ามี) */}
           {errorMsg && (
             <div className="mb-5 rounded-lg bg-red-50 p-3 text-sm text-red-600 border border-red-100">
               {errorMsg}
