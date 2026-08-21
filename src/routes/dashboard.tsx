@@ -4,7 +4,7 @@ import { supabase } from "@/lib/supabase";
 import { PageShell } from "@/components/PageShell";
 import { 
   History, BookOpen, Award, ChevronLeft, Loader2, 
-  Calendar, AlertCircle, RefreshCw, CheckCircle2, XCircle, Lightbulb, X, TrendingUp, Sparkles, Flame, Check
+  Calendar, AlertCircle, RefreshCw, CheckCircle2, XCircle, Lightbulb, X, TrendingUp, Sparkles, Flame
 } from "lucide-react";
 
 export const Route = createFileRoute("/dashboard")({
@@ -33,6 +33,7 @@ function StudentDashboard() {
   const [retryModalItem, setRetryModalItem] = useState<any>(null);
   const [retryAnswer, setRetryAnswer] = useState<any>("");
   const [retryStatus, setRetryStatus] = useState<"idle" | "correct" | "wrong">("idle");
+  const [localMistakes, setLocalMistakes] = useState<any[]>([]);
 
   useEffect(() => {
     fetchStudentData();
@@ -59,11 +60,20 @@ function StudentDashboard() {
           name: session.user.user_metadata?.['name'] || session.user.email?.split('@')[0] || "นักเรียน",
           email: session.user.email,
           examHistory: [],
-          mistakeBank: [],
           scores: { math: 0, english: 0, science: 0, thai: 0, social: 0 }
         });
+        setLocalMistakes([]);
       } else {
         setStudent(data);
+        // ดึงข้อผิดจากประวัติการทำข้อสอบ (examHistory)
+        const extractedMistakes: any[] = [];
+        const historyList = Array.isArray(data.examHistory) ? data.examHistory : [];
+        historyList.forEach((h: any) => {
+          if (Array.isArray(h.mistakes)) {
+            extractedMistakes.push(...h.mistakes);
+          }
+        });
+        setLocalMistakes(extractedMistakes);
       }
     } catch (error) {
       console.error("Error fetching student:", error);
@@ -86,7 +96,7 @@ function StudentDashboard() {
   if (!student) return null;
 
   const history = Array.isArray(student.examHistory) ? student.examHistory : [];
-  const mistakes = Array.isArray(student.mistakeBank) ? student.mistakeBank : [];
+  const mistakes = localMistakes;
   const scores = student.scores || { math: 0, english: 0, science: 0, thai: 0, social: 0 };
 
   const totalExamsTaken = history.length;
@@ -105,7 +115,7 @@ function StudentDashboard() {
     setRetryStatus("idle");
   };
 
-  const handleCheckRetry = async () => {
+  const handleCheckRetry = () => {
     if (!retryModalItem) return;
     
     let isCorrect = false;
@@ -118,12 +128,7 @@ function StudentDashboard() {
 
     if (isCorrect) {
       setRetryStatus("correct");
-      const updatedMistakes = mistakes.filter((m: any) => m.id !== retryModalItem.id);
-      setStudent((prev: any) => ({ ...prev, mistakeBank: updatedMistakes }));
-      
-      if (typeof student.id === "number") {
-        await supabase.from("students").update({ mistakeBank: updatedMistakes }).eq("id", student.id);
-      }
+      setLocalMistakes(prev => prev.filter((m: any) => m.id !== retryModalItem.id));
     } else {
       setRetryStatus("wrong");
     }
@@ -376,7 +381,7 @@ function StudentDashboard() {
         )}
       </div>
 
-      {/* Modal: Retry Mistake Question (Liquid Glass Theme) */}
+      {/* Modal: Retry Mistake Question */}
       {retryModalItem && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/60 backdrop-blur-md p-4 animate-in fade-in duration-300">
           <div className="backdrop-blur-2xl bg-white/95 border border-white rounded-[2.5rem] w-full max-w-2xl max-h-[90vh] flex flex-col p-6 sm:p-8 shadow-[0_25px_60px_rgba(0,0,0,0.2)] animate-in zoom-in-95 overflow-hidden">
