@@ -38,6 +38,7 @@ const safeGetArray = (val: any): string[] => {
 
 function AdminDashboard() {
   const navigate = useNavigate(); 
+  const [isAuthChecking, setIsAuthChecking] = useState(true);
   const [activeTab, setActiveTab] = useState<"dashboard" | "lessons" | "exams" | "users" | "worksheets" | "codes">("exams");
 
   // --- States ---
@@ -89,11 +90,34 @@ function AdminDashboard() {
   const [filterSubject, setFilterSubject] = useState("ทั้งหมด");
 
   useEffect(() => {
-    fetchStudents();
-    fetchExams();
-    fetchLessons();
-    fetchWorksheets();
-    fetchAccessCodes();
+    const checkAuthAndFetch = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) {
+        navigate({ to: "/login" });
+        return;
+      }
+
+      // ดึงข้อมูลทั้งหมดหลังยืนยัน Session เรียบร้อย
+      await Promise.all([
+        fetchStudents(),
+        fetchExams(),
+        fetchLessons(),
+        fetchWorksheets(),
+        fetchAccessCodes()
+      ]);
+
+      setIsAuthChecking(false);
+    };
+
+    checkAuthAndFetch();
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (!session) {
+        navigate({ to: "/login" });
+      }
+    });
+
+    return () => subscription.unsubscribe();
   }, []);
 
   const fetchStudents = async () => {
@@ -1058,6 +1082,17 @@ function AdminDashboard() {
   });
 
   const choiceLabels = ["ก.", "ข.", "ค.", "ง.", "จ."];
+
+  if (isAuthChecking) {
+    return (
+      <div className="flex min-h-screen w-full items-center justify-center bg-slate-50">
+        <div className="flex flex-col items-center gap-3">
+          <Loader2 className="size-8 animate-spin text-primary" />
+          <p className="text-sm font-bold text-slate-500">กำลังตรวจสอบสิทธิ์ Admin...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="flex min-h-screen w-full bg-slate-50 text-slate-900 font-sans">

@@ -3,7 +3,7 @@ import { useState, useEffect, useRef } from "react";
 import { 
   ChevronLeft, ChevronRight, CheckCircle2, X, Award, Lightbulb, 
   Check, XCircle, FileSearch, Eraser, Sparkles, Loader2, PenTool, 
-  TrendingUp, Users, Target, BarChart2, Timer, Bookmark, AlertCircle, 
+  TrendingUp, BarChart2, Timer, Bookmark, 
   BotMessageSquare, Send
 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
@@ -296,7 +296,6 @@ function ExamSessionPage() {
       name: session.user.user_metadata?.['name'] || session.user.email?.split('@')[0] || "นักเรียน",
       email: session.user.email, 
       examHistory: [], 
-      mistakeBank: [],
       scores: {} 
     };
     setStudent(currentStudent);
@@ -439,22 +438,6 @@ function ExamSessionPage() {
         });
       }
 
-      const currentHistory = Array.isArray(student.examHistory) ? student.examHistory : [];
-      const newHistoryRecord = {
-        id: Date.now(),
-        exam_id: examData.id,
-        title: examData.title,
-        subject: examData.subject,
-        year: examData.year,
-        program: decodeURIComponent(program),
-        score: score,
-        total: total,
-        date: new Date().toLocaleDateString('th-TH', { year: 'numeric', month: 'short', day: 'numeric' }),
-        timeSpent: "เสร็จสิ้น"
-      };
-
-      const updatedHistory = [...currentHistory, newHistoryRecord];
-
       const wrongQuestions = details
         .filter((d: any) => !d.isCorrect)
         .map((d: any) => ({
@@ -469,8 +452,22 @@ function ExamSessionPage() {
           question_data: questions[d.qIndex]
         }));
 
-      const prevMistakes = Array.isArray(student.mistakeBank) ? student.mistakeBank : [];
-      const updatedMistakes = [...prevMistakes, ...wrongQuestions];
+      const currentHistory = Array.isArray(student.examHistory) ? student.examHistory : [];
+      const newHistoryRecord = {
+        id: Date.now(),
+        exam_id: examData.id,
+        title: examData.title,
+        subject: examData.subject,
+        year: examData.year,
+        program: decodeURIComponent(program),
+        score: score,
+        total: total,
+        date: new Date().toLocaleDateString('th-TH', { year: 'numeric', month: 'short', day: 'numeric' }),
+        timeSpent: "เสร็จสิ้น",
+        mistakes: wrongQuestions
+      };
+
+      const updatedHistory = [...currentHistory, newHistoryRecord];
 
       const currentScores = student.scores || { math: 0, english: 0, science: 0, thai: 0, social: 0 };
       let subjectKey = "other";
@@ -485,7 +482,6 @@ function ExamSessionPage() {
       if (typeof student.id === 'number') {
         await supabase.from("students").update({
           examHistory: updatedHistory,
-          mistakeBank: updatedMistakes,
           scores: updatedScores
         }).eq("id", student.id);
       }
