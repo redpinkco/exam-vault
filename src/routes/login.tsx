@@ -7,10 +7,9 @@ export const Route = createFileRoute("/login")({
   component: LoginPage,
 });
 
-// รายชื่ออีเมลที่เป็น Admin (ใส่เพิ่มได้ตามต้องการ)
+// ✅ แก้ไข: เหลือแค่ ttanasak@gmail.com เป็น Admin คนเดียว
 const ADMIN_EMAILS = [
-  "ttanasak@gmail.com",
-  "redpinkcosmetic@gmail.com"
+  "ttanasak@gmail.com"
 ];
 
 function LoginPage() {
