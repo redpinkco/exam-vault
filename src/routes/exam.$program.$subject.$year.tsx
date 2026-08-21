@@ -36,15 +36,6 @@ const AITutorChat = ({ questionData, userAnswer, correctAnswer }: { questionData
     setIsTyping(true);
 
     try {
-      // ✅ ดึงคีย์ผ่าน Environment Variable อย่างปลอดภัย
-      const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
-      
-      if(!apiKey) {
-        setMessages(prev => [...prev, { role: "ai", text: "คุณครู AI ยังไม่พร้อมทำงาน กรุณาตั้งค่า API Key ในไฟล์ .env ก่อนนะครับ" }]);
-        setIsTyping(false);
-        return;
-      }
-
       const contextPrompt = `คุณคือ "ครูผู้ช่วย AI ประจำคลังสอบ" หน้าที่ของคุณคืออธิบายวิธีคิดให้เด็กนักเรียนอย่างใจดี เป็นกันเอง และเข้าใจง่าย
       
       ข้อมูลโจทย์ข้อนี้:
@@ -58,10 +49,12 @@ const AITutorChat = ({ questionData, userAnswer, correctAnswer }: { questionData
       
       กรุณาตอบคำถามนักเรียนโดยใช้ภาษาที่อ่านง่าย ไม่วิชาการเกินไป และให้กำลังใจนักเรียนด้วย`;
 
-      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent`, {
+      // ✅ ยิงไปที่หลังบ้านของเราแทน (ซ่อน API Key ไว้ที่ Vercel)
+      const response = await fetch(`/api/gemini`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", "x-goog-api-key": apiKey },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          model: "gemini-1.5-flash",
           contents: [{ parts: [{ text: contextPrompt }] }]
         })
       });
@@ -155,21 +148,14 @@ const SubjectiveCanvas = ({ answer, onUpdate }: { answer: string; onUpdate: (val
     try {
       const imageBase64 = sigCanvas.current?.getTrimmedCanvas().toDataURL("image/jpeg", 0.9).split(",")[1];
       
-      // ✅ ดึงคีย์ผ่าน Environment Variable อย่างปลอดภัย
-      const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
-      
-      if(!apiKey) {
-        alert("กรุณาตั้งค่า API Key ในไฟล์ .env ก่อนใช้งาน AI ตรวจลายมือ");
-        setIsChecking(false);
-        return;
-      }
-
       const prompt = `อ่านลายมือในรูปภาพนี้ (อาจจะเป็นตัวเลข, ภาษาอังกฤษ หรือภาษาไทย) ตอบกลับมาเฉพาะคำหรือตัวเลขที่อ่านได้อย่างแม่นยำที่สุด ห้ามมีคำอธิบายเพิ่มเติม หากอ่านไม่ออกให้ตอบว่า '-'`;
 
-      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent`, {
+      // ✅ ยิงไปที่หลังบ้านของเราแทน (ซ่อน API Key ไว้ที่ Vercel)
+      const response = await fetch(`/api/gemini`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", "x-goog-api-key": apiKey },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          model: "gemini-1.5-flash",
           contents: [{ parts: [{ text: prompt }, { inline_data: { mime_type: "image/jpeg", data: imageBase64 } }] }]
         })
       });

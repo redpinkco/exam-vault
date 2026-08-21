@@ -12,6 +12,7 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as AdminRouteImport } from './routes/admin'
 import { Route as DashboardRouteImport } from './routes/dashboard'
+import { Route as LeaderboardRouteImport } from './routes/leaderboard'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as ProgramsRouteImport } from './routes/programs'
 import { Route as HubProgramRouteImport } from './routes/hub.$program'
@@ -31,6 +32,11 @@ const AdminRoute = AdminRouteImport.update({
 const DashboardRoute = DashboardRouteImport.update({
   id: '/dashboard',
   path: '/dashboard',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const LeaderboardRoute = LeaderboardRouteImport.update({
+  id: '/leaderboard',
+  path: '/leaderboard',
   getParentRoute: () => rootRouteImport,
 } as any)
 const LoginRoute = LoginRouteImport.update({
@@ -63,6 +69,7 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/admin': typeof AdminRoute
   '/dashboard': typeof DashboardRoute
+  '/leaderboard': typeof LeaderboardRoute
   '/login': typeof LoginRoute
   '/programs': typeof ProgramsRoute
   '/hub/$program': typeof HubProgramRoute
@@ -73,6 +80,7 @@ export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/admin': typeof AdminRoute
   '/dashboard': typeof DashboardRoute
+  '/leaderboard': typeof LeaderboardRoute
   '/login': typeof LoginRoute
   '/programs': typeof ProgramsRoute
   '/hub/$program': typeof HubProgramRoute
@@ -84,6 +92,7 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/admin': typeof AdminRoute
   '/dashboard': typeof DashboardRoute
+  '/leaderboard': typeof LeaderboardRoute
   '/login': typeof LoginRoute
   '/programs': typeof ProgramsRoute
   '/hub/$program': typeof HubProgramRoute
@@ -96,6 +105,7 @@ export interface FileRouteTypes {
     | '/'
     | '/admin'
     | '/dashboard'
+    | '/leaderboard'
     | '/login'
     | '/programs'
     | '/hub/$program'
@@ -106,6 +116,7 @@ export interface FileRouteTypes {
     | '/'
     | '/admin'
     | '/dashboard'
+    | '/leaderboard'
     | '/login'
     | '/programs'
     | '/hub/$program'
@@ -116,6 +127,7 @@ export interface FileRouteTypes {
     | '/'
     | '/admin'
     | '/dashboard'
+    | '/leaderboard'
     | '/login'
     | '/programs'
     | '/hub/$program'
@@ -127,6 +139,7 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AdminRoute: typeof AdminRoute
   DashboardRoute: typeof DashboardRoute
+  LeaderboardRoute: typeof LeaderboardRoute
   LoginRoute: typeof LoginRoute
   ProgramsRoute: typeof ProgramsRoute
   HubProgramRoute: typeof HubProgramRoute
@@ -155,6 +168,13 @@ declare module '@tanstack/react-router' {
       path: '/dashboard'
       fullPath: '/dashboard'
       preLoaderRoute: typeof DashboardRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/leaderboard': {
+      id: '/leaderboard'
+      path: '/leaderboard'
+      fullPath: '/leaderboard'
+      preLoaderRoute: typeof LeaderboardRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/login': {
@@ -199,6 +219,7 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AdminRoute: AdminRoute,
   DashboardRoute: DashboardRoute,
+  LeaderboardRoute: LeaderboardRoute,
   LoginRoute: LoginRoute,
   ProgramsRoute: ProgramsRoute,
   HubProgramRoute: HubProgramRoute,

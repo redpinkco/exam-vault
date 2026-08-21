@@ -82,22 +82,15 @@ function WorksheetPage() {
       const finalImageBase64 = mergeCanvas.toDataURL("image/jpeg", 0.8).split(",")[1];
 
       // 4. ส่งให้ Gemini ตรวจ
-      // ✅ ดึงคีย์ผ่าน Environment Variable อย่างปลอดภัย
-      const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
-      
-      if(!apiKey) {
-        alert("กรุณาตั้งค่า API Key ในไฟล์ .env ก่อนใช้งาน AI ตรวจกระดาษคำตอบ");
-        setIsChecking(false);
-        return;
-      }
-      
       const prompt = `ทำหน้าที่เป็นคุณครูใจดี ตรวจแบบฝึกหัดในรูปภาพนี้ รูปนี้ประกอบด้วยโจทย์และลายมือเขียนคำตอบของนักเรียนซ้อนทับกันอยู่ 
       กรุณาอ่านลายมือและตรวจสอบความถูกต้องทีละข้อ (อิงจากโจทย์ในรูป) พร้อมสรุปคะแนนคร่าวๆ และให้คำแนะนำนักเรียนอย่างเป็นกันเองและให้กำลังใจ`;
 
-      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro:generateContent`, {
+      // ✅ ยิงไปที่หลังบ้านของเราแทน (ซ่อน API Key ไว้ที่ Vercel)
+      const response = await fetch(`/api/gemini`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", "x-goog-api-key": apiKey },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          model: "gemini-1.5-pro", // ใช้รุ่น Pro สำหรับการอ่านภาพที่ซับซ้อน
           contents: [{ parts: [{ text: prompt }, { inline_data: { mime_type: "image/jpeg", data: finalImageBase64 } }] }]
         })
       });

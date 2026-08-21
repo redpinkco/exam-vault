@@ -489,7 +489,7 @@ function AdminDashboard() {
     });
   };
 
-  // 💡 ฟังก์ชันให้ AI ช่วยเขียนเฉลย (ฝัง API Key ที่คุณสร้างให้แล้ว)
+  // 💡 อัปเดตฟังก์ชันให้วิ่งไปที่ api/gemini
   const handleGenerateExplanation = async (qIndex: number) => {
     const q = manualQuestions[qIndex];
     if (!q) return; 
@@ -500,9 +500,6 @@ function AdminDashboard() {
 
     setGeneratingExpId(qIndex);
     try {
-      // ✅ ใช้ API Key จากในรูปภาพของคุณเลยครับ
-      const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
-
       let promptText = "";
       const questionText = q.question ? q.question : "วิเคราะห์และแก้โจทย์ปัญหาจากรูปภาพประกอบ";
 
@@ -528,38 +525,22 @@ function AdminDashboard() {
         }
       }
 
-      const requestBody = JSON.stringify({ contents: [{ parts: requestParts }] });
+      // ✅ ยิงไปที่หลังบ้านของเราแทน (ซ่อน API Key ไว้ที่ Vercel)
+      const response = await fetch(`/api/gemini`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model: q.image_url && q.image_url !== "NEEDS_IMAGE" ? "gemini-1.5-pro" : "gemini-1.5-flash", 
+          contents: [{ parts: requestParts }]
+        })
+      });
 
-      // ใช้ Fallback รุ่นต่างๆ
-      const candidateModels = ["gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-3.5-flash"];
-      let parsedText = "";
-      let lastErrorMessage = "";
-
-      for (const model of candidateModels) {
-        try {
-          const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json", "x-goog-api-key": apiKey },
-            body: requestBody
-          });
-
-          const data = await response.json();
-          
-          if (response.ok && data.candidates?.[0]?.content?.parts?.[0]?.text) {
-            parsedText = data.candidates[0].content.parts[0].text.trim();
-            break; 
-          } else {
-            lastErrorMessage = data.error?.message || `Error status ${response.status}`;
-          }
-        } catch (err: any) { 
-          lastErrorMessage = err.message; 
-        }
-      }
-
-      if (parsedText) {
-        updateQuestionExplanation(qIndex, parsedText);
+      const data = await response.json();
+      
+      if (response.ok && data.candidates?.[0]?.content?.parts?.[0]?.text) {
+         updateQuestionExplanation(qIndex, data.candidates[0].content.parts[0].text.trim());
       } else {
-        throw new Error(lastErrorMessage || "ไม่สามารถเชื่อมต่อกับ Google AI ได้ กรุณาลองใหม่อีกครั้ง");
+         throw new Error(data.error?.message || "ไม่สามารถเชื่อมต่อกับ Google AI ได้ในขณะนี้");
       }
 
     } catch (error: any) {
@@ -580,14 +561,11 @@ function AdminDashboard() {
 
   const removeImage = (indexToRemove: number) => setPreviewImages(prev => prev.filter((_, index) => index !== indexToRemove));
 
-  // 💡 อัปเดตระบบสแกนข้อสอบ (ฝัง API Key ให้เรียบร้อย)
+  // 💡 อัปเดตฟังก์ชันให้วิ่งไปที่ api/gemini
   const processImageWithAI = async () => {
     if (previewImages.length === 0) return;
     setIsAiProcessing(true);
     setAiResult(null);
-
-    // ✅ ใช้ API Key จากในรูปภาพของคุณเลยครับ
-    const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
 
     try {
       const imageParts = await Promise.all(
@@ -615,37 +593,23 @@ function AdminDashboard() {
 3. หากเฉลยในรูปมีการโยงลูกศรแบบรูปภาพ (เช่น อนุกรมตัวเลข) ให้เขียนอธิบายเป็น text ในช่อง explanation แทนการแปลงเป็นเครื่องหมายแปลกๆ
 4. ตอบกลับมาเป็นโครงสร้าง JSON เพียวๆ เท่านั้น ห้ามใส่ markdown code block`;
 
-      const requestBody = JSON.stringify({ contents: [{ parts: [{ text: promptText }, ...imageParts] }] });
+      // ✅ ยิงไปที่หลังบ้านของเราแทน (ซ่อน API Key ไว้ที่ Vercel)
+      const response = await fetch(`/api/gemini`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model: "gemini-1.5-pro", 
+          contents: [{ parts: [{ text: promptText }, ...imageParts] }]
+        })
+      });
 
-      const candidateModels = ["gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-3.5-flash"];
-      let parsedJsonResult: any = null;
-      let lastErrorMessage = "";
+      const data = await response.json();
+      
+      if (response.ok && data.candidates?.[0]?.content?.parts?.[0]?.text) {
+        const rawText = data.candidates[0].content.parts[0].text;
+        const cleanedText = rawText.replace(/```json|```/g, "").trim();
+        const parsedJsonResult = JSON.parse(cleanedText);
 
-      for (const model of candidateModels) {
-        try {
-          const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json", "x-goog-api-key": apiKey },
-            body: requestBody
-          });
-
-          const data = await response.json();
-          
-          if (response.ok && data.candidates?.[0]?.content?.parts?.[0]?.text) {
-            const rawText = data.candidates[0].content.parts[0].text;
-            const cleanedText = rawText.replace(/```json|```/g, "").trim();
-            parsedJsonResult = JSON.parse(cleanedText);
-            break;
-          } else {
-            lastErrorMessage = data.error?.message || `Error status ${response.status}`;
-          }
-        } catch (err: any) { 
-          lastErrorMessage = err.message; 
-        }
-        if (parsedJsonResult) break;
-      }
-
-      if (parsedJsonResult) {
         const formatted: QuestionItem[] = (Array.isArray(parsedJsonResult) ? parsedJsonResult : [parsedJsonResult]).map((item: any, idx: number) => {
           const isNeedsImage = item.image_url === "NEEDS_IMAGE" || (item.question || "").includes("จากรูป");
 
@@ -666,7 +630,7 @@ function AdminDashboard() {
         setAiResult(formatted);
         setExamModalMode("ai_result");
       } else {
-        throw new Error(lastErrorMessage || "ไม่สามารถเชื่อมต่อกับ Google AI ได้ในขณะนี้");
+        throw new Error(data.error?.message || "ไม่สามารถเชื่อมต่อกับ Google AI ได้ในขณะนี้");
       }
 
     } catch (error: any) {
