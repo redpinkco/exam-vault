@@ -16,6 +16,11 @@ export const Route = createFileRoute("/admin")({
   component: AdminDashboard,
 });
 
+// ✅ แก้ไข: เหลือแค่ ttanasak@gmail.com เป็น Admin คนเดียว
+const ADMIN_EMAILS = [
+  "ttanasak@gmail.com"
+];
+
 const defaultPermissions = { "ป.4": false, "ป.5": false, "ป.6": true, "ISM": true, "EP": false, "ภาคปกติ": false };
 
 interface QuestionItem {
@@ -92,8 +97,18 @@ function AdminDashboard() {
   useEffect(() => {
     const checkAuthAndFetch = async () => {
       const { data: { session } } = await supabase.auth.getSession();
-      if (!session) {
+      
+      if (!session?.user?.email) {
         navigate({ to: "/login" });
+        return;
+      }
+
+      const currentEmail = session.user.email.toLowerCase().trim();
+
+      // ✅ ป้องกันผู้ใช้ทั่วไปเข้าหน้า Admin
+      if (!ADMIN_EMAILS.includes(currentEmail)) {
+        alert("⚠️ คุณไม่มีสิทธิ์เข้าถึงหน้านี้");
+        navigate({ to: "/" });
         return;
       }
 
@@ -112,13 +127,18 @@ function AdminDashboard() {
     checkAuthAndFetch();
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      if (!session) {
+      if (!session?.user?.email) {
         navigate({ to: "/login" });
+      } else {
+        const currentEmail = session.user.email.toLowerCase().trim();
+        if (!ADMIN_EMAILS.includes(currentEmail)) {
+          navigate({ to: "/" });
+        }
       }
     });
 
     return () => subscription.unsubscribe();
-  }, []);
+  }, [navigate]);
 
   const fetchStudents = async () => {
     const { data, error } = await supabase.from('students').select('*').order('id', { ascending: true });
