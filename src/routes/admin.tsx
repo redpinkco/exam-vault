@@ -349,36 +349,46 @@ function AdminDashboard() {
     }));
   };
 
-  const handleSaveStudent = async (e: React.FormEvent) => { 
-    e.preventDefault(); 
-    if (isEditing) { 
+  const handleSaveStudent = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (formData.id) {
       const { error } = await supabase.from('students').update({
-        name: formData.name, email: formData.email, phone: formData.phone, permissions: formData.permissions
+        name: formData.name,
+        email: formData.email,
+        phone: formData.phone,
+        permissions: formData.permissions,
       }).eq('id', formData.id);
-      
+
       if (error) {
         alert("เกิดข้อผิดพลาดในการอัปเดต: " + error.message);
       } else {
         alert("อัปเดตข้อมูลและสิทธิ์นักเรียนสำเร็จ!");
-        fetchStudents(); 
+        fetchStudents();
         if (selectedStudent?.id === formData.id) setSelectedStudent({ ...selectedStudent, ...formData });
       }
-    } else { 
+    } else {
       const { data: { session: adminSession } } = await supabase.auth.getSession();
       const { error: authError } = await supabase.auth.signUp({ email: formData.email, password: formData.password });
       if (authError) return alert("ไม่สามารถสร้างบัญชีได้: " + authError.message);
-      
+
       if (adminSession) {
         await supabase.auth.setSession({ access_token: adminSession.access_token, refresh_token: adminSession.refresh_token });
       }
+
       const { error } = await supabase.from('students').insert([{
-        name: formData.name, email: formData.email, phone: formData.phone,
-        permissions: formData.permissions, scores: { math: 0, english: 0, science: 0, thai: 0, social: 0 }, examHistory: [], mistakeBank: []
+        name: formData.name,
+        email: formData.email,
+        phone: formData.phone,
+        permissions: formData.permissions,
+        scores: { math: 0, english: 0, science: 0, thai: 0, social: 0 },
+        exam_history: [],
+        mistake_bank: []
       }]);
+
       if (error) alert("เกิดข้อผิดพลาด: " + error.message);
       else { alert("สร้างบัญชีนักเรียนสำเร็จ!"); fetchStudents(); }
-    } 
-    setShowStudentModal(false); 
+    }
+    setShowStudentModal(false);
   };
 
   const handleDeleteStudent = async (id: number) => { 
