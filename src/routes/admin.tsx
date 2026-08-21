@@ -1,13 +1,16 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useState, useEffect } from "react";
 import { 
-  LayoutDashboard, BookOpen, Clock, Users, PlusCircle, Edit, 
+  LayoutDashboard, BookOpen, Users, PlusCircle, Edit, 
   Trash2, UploadCloud, FileText, X, BarChart3, Mail, Phone, Lock, Save, History, 
-  Image as ImageIcon, Sparkles, ChevronLeft, Filter, Search, Unlock, LogOut,
-  GraduationCap, Video, CheckCircle2, Plus, ArrowUpRight, AlignLeft, CheckSquare,
-  HelpCircle, Lightbulb, ShieldCheck, AlertTriangle, FilePenLine, Loader2, RefreshCw
+  Image as ImageIcon, Sparkles, ChevronLeft, Filter, Unlock, LogOut,
+  GraduationCap, Video, CheckCircle2, Plus, AlignLeft, CheckSquare,
+  Lightbulb, ShieldCheck, AlertTriangle, FilePenLine, Loader2, RefreshCw, 
+  AlertOctagon, Download, Copy, Key, Shuffle, FileDown
 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
+import { Document, Packer, Paragraph, TextRun, HeadingLevel, AlignmentType } from "docx";
+import { saveAs } from "file-saver";
 
 export const Route = createFileRoute("/admin")({
   component: AdminDashboard,
@@ -35,7 +38,7 @@ const safeGetArray = (val: any): string[] => {
 
 function AdminDashboard() {
   const navigate = useNavigate(); 
-  const [activeTab, setActiveTab] = useState<"dashboard" | "lessons" | "exams" | "users" | "worksheets">("exams");
+  const [activeTab, setActiveTab] = useState<"dashboard" | "lessons" | "exams" | "users" | "worksheets" | "codes">("exams");
 
   // --- States ---
   const [students, setStudents] = useState<any[]>([]);
@@ -54,9 +57,9 @@ function AdminDashboard() {
   const [editingExamId, setEditingExamId] = useState<number | null>(null);
   const [examModalMode, setExamModalMode] = useState<"none" | "select" | "exam_info" | "ai" | "manual" | "ai_result">("none");
   const [newExamInfo, setNewExamInfo] = useState<{ 
-    title: string; grade: string[]; program: string[]; subject: string; year: string; is_timed: boolean; duration_minutes: number;
+    title: string; grade: string[]; program: string[]; subject: string; year: string; is_timed: boolean; duration_minutes: number; shuffle_questions?: boolean;
   }>({ 
-    title: "", grade: ["ป.6"], program: ["ISM"], subject: "คณิตศาสตร์", year: "2566", is_timed: true, duration_minutes: 90 
+    title: "", grade: ["ป.6"], program: ["ISM"], subject: "คณิตศาสตร์", year: "2566", is_timed: true, duration_minutes: 90, shuffle_questions: false 
   });
   
   const [manualQuestions, setManualQuestions] = useState<QuestionItem[]>([
@@ -76,6 +79,11 @@ function AdminDashboard() {
   });
   const [isUploading, setIsUploading] = useState(false);
 
+  // Activation Codes State
+  const [accessCodes, setAccessCodes] = useState<any[]>([]);
+  const [newCodeName, setNewCodeName] = useState("");
+  const [newCodePerms, setNewCodePerms] = useState(defaultPermissions);
+
   const [filterGrade, setFilterGrade] = useState("ป.6");
   const [filterProgram, setFilterProgram] = useState("ISM");
   const [filterSubject, setFilterSubject] = useState("ทั้งหมด");
@@ -85,6 +93,7 @@ function AdminDashboard() {
     fetchExams();
     fetchLessons();
     fetchWorksheets();
+    fetchAccessCodes();
   }, []);
 
   const fetchStudents = async () => {
@@ -110,6 +119,11 @@ function AdminDashboard() {
     if (!error && data) setWorksheets(data);
   };
 
+  const fetchAccessCodes = async () => {
+    const { data } = await supabase.from('access_codes').select('*').order('created_at', { ascending: false });
+    if (data) setAccessCodes(data);
+  };
+
   const uploadImageToStorage = async (file: File, folderName: string): Promise<string> => {
     const fileExt = file.name.split('.').pop();
     const fileName = `${folderName}/${Math.random().toString(36).substring(2, 15)}_${Date.now()}.${fileExt}`;
@@ -128,6 +142,193 @@ function AdminDashboard() {
     return publicUrl;
   };
 
+  // --- Export MS Word Handler ---
+  const handleExportWord = async (exam: any, includeSolutions: boolean = false) => {
+    const questions: QuestionItem[] = Array.isArray(exam.questions) ? exam.questions : [];
+    const choicePrefixes = ["ก.", "ข.", "ค.", "ง.", "จ."];
+
+    const docChildren: Paragraph[] = [
+      new Paragraph({
+        text: exam.title || "ชุดข้อสอบ",
+        heading: HeadingLevel.TITLE,
+        alignment: AlignmentType.CENTER,
+        spacing: { after: 120 }
+      }),
+      new Paragraph({
+        alignment: AlignmentType.CENTER,
+        spacing: { after: 300 },
+        children: [
+          new TextRun({ text: `ระดับชั้น: ${safeGetArray(exam.grade).join(", ")}  |  `, bold: true }),
+          new TextRun({ text: `แผนการเรียน: ${safeGetArray(exam.program).join(", ")}  |  `, bold: true }),
+          new TextRun({ text: `วิชา: ${exam.subject}  |  ปีการศึกษา: ${exam.year || "-"}`, bold: true }),
+        ]
+      }),
+      new Paragraph({
+        text: includeSolutions ? "--- เฉลยคำตอบและคำอธิบายวิธีทำละเอียด ---" : "ชื่อ-นามสกุล: ............................................................................ เลขที่: ............ ห้อง: ............",
+        spacing: { after: 300 }
+      })
+    ];
+
+    questions.forEach((q, idx) => {
+      // หัวข้อโจทย์
+      docChildren.push(
+        new Paragraph({
+          spacing: { before: 200, after: 100 },
+          children: [
+            new TextRun({ text: `ข้อที่ ${idx + 1}. `, bold: true }),
+            new TextRun({ text: q.question || "" })
+          ]
+        })
+      );
+
+      // ถ้าเป็นโจทย์ปรนัย
+      if (q.type === "choice" && q.options) {
+        q.options.forEach((opt, optIdx) => {
+          const isCorrect = optIdx === q.correct_index;
+          docChildren.push(
+            new Paragraph({
+              spacing: { before: 40, after: 40 },
+              indent: { left: 400 },
+              children: [
+                new TextRun({ text: `${choicePrefixes[optIdx] || `${optIdx + 1}.`} ${opt}` }),
+                ...(includeSolutions && isCorrect ? [new TextRun({ text: "  ✓ (คำตอบที่ถูกต้อง)", bold: true, color: "008800" })] : [])
+              ]
+            })
+          );
+        });
+      } else {
+        // ถ้าเป็นโจทย์อัตนัย
+        if (includeSolutions) {
+          docChildren.push(
+            new Paragraph({
+              spacing: { before: 60, after: 60 },
+              indent: { left: 400 },
+              children: [
+                new TextRun({ text: `คำตอบที่ถูกต้อง: ${(q.subjective_answers || []).join(" หรือ ")}`, bold: true, color: "008800" })
+              ]
+            })
+          );
+        } else {
+          docChildren.push(
+            new Paragraph({
+              spacing: { before: 80, after: 80 },
+              indent: { left: 400 },
+              text: "ตอบ: ...................................................................................................................................."
+            })
+          );
+        }
+      }
+
+      // แสดงเฉลยวิธีทำถ้าเปิดโหมดครู
+      if (includeSolutions && q.explanation) {
+        docChildren.push(
+          new Paragraph({
+            spacing: { before: 100, after: 160 },
+            indent: { left: 400 },
+            children: [
+              new TextRun({ text: "วิธีทำและคำอธิบาย: ", bold: true, color: "555555" }),
+              new TextRun({ text: q.explanation, color: "555555" })
+            ]
+          })
+        );
+      }
+    });
+
+    const doc = new Document({
+      sections: [{ properties: {}, children: docChildren }]
+    });
+
+    const blob = await Packer.toBlob(doc);
+    saveAs(blob, `${exam.title || "Exam"}_${includeSolutions ? "เฉลย" : "ชุดข้อสอบ"}.docx`);
+  };
+
+  // --- Export CSV Handler ---
+  const handleExportCSV = () => {
+    if (students.length === 0) return alert("ไม่มีข้อมูลนักเรียนให้ส่งออก");
+
+    const headers = ["ID", "ชื่อ-นามสกุล", "อีเมล", "เบอร์โทร", "คะแนนเฉลี่ยคณิต", "คะแนนเฉลี่ยวิทย์", "คะแนนเฉลี่ยอังกฤษ", "จำนวนข้อสอบที่ทำ"];
+    const rows = students.map(s => [
+      s.id,
+      `"${s.name || ""}"`,
+      `"${s.email || ""}"`,
+      `"${s.phone || ""}"`,
+      s.scores?.math || 0,
+      s.scores?.science || 0,
+      s.scores?.english || 0,
+      (s.examHistory || []).length
+    ]);
+
+    const csvContent = "data:text/csv;charset=utf-8,\uFEFF" + [headers.join(","), ...rows.map(e => e.join(","))].join("\n");
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement("a");
+    link.setAttribute("href", encodedUri);
+    link.setAttribute("download", `exam_vault_students_${new Date().toISOString().slice(0, 10)}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  // --- Duplicate Item Handlers ---
+  const handleDuplicateExam = async (exam: any) => {
+    const duplicatedPayload = {
+      ...exam,
+      id: undefined,
+      title: `${exam.title} (สำเนา)`,
+      created_at: new Date().toISOString()
+    };
+    delete duplicatedPayload.id;
+
+    const { error } = await supabase.from('exams').insert([duplicatedPayload]);
+    if (error) alert("คัดลอกไม่สำเร็จ: " + error.message);
+    else {
+      alert("คัดลอกชุดข้อสอบเรียบร้อยแล้ว");
+      fetchExams();
+    }
+  };
+
+  const handleDuplicateWorksheet = async (ws: any) => {
+    const duplicatedPayload = {
+      ...ws,
+      id: undefined,
+      title: `${ws.title} (สำเนา)`
+    };
+    delete duplicatedPayload.id;
+
+    const { error } = await supabase.from('worksheets').insert([duplicatedPayload]);
+    if (error) alert("คัดลอกไม่สำเร็จ: " + error.message);
+    else {
+      alert("คัดลอกแบบฝึกหัดเรียบร้อยแล้ว");
+      fetchWorksheets();
+    }
+  };
+
+  // --- Access Code Handlers ---
+  const handleCreateAccessCode = async () => {
+    if (!newCodeName.trim()) return alert("กรุณาใส่ชื่อรหัสโค้ด");
+    const code = newCodeName.toUpperCase().replace(/\s+/g, "");
+
+    const { error } = await supabase.from('access_codes').insert([{
+      code,
+      permissions: newCodePerms,
+      is_active: true
+    }]);
+
+    if (error) alert("สร้างโค้ดไม่สำเร็จ: " + error.message);
+    else {
+      alert(`สร้างโค้ด ${code} สำเร็จ!`);
+      setNewCodeName("");
+      fetchAccessCodes();
+    }
+  };
+
+  const handleDeleteAccessCode = async (id: string | number) => {
+    if (confirm("ต้องการลบโค้ดนี้ใช่หรือไม่?")) {
+      const { error } = await supabase.from('access_codes').delete().eq('id', id);
+      if (!error) fetchAccessCodes();
+    }
+  };
+
+  // --- Student Actions ---
   const handleOpenAddStudent = () => { 
     setFormData({ id: 0, name: "", email: "", password: "", phone: "", permissions: defaultPermissions }); 
     setIsEditing(false); 
@@ -183,8 +384,57 @@ function AdminDashboard() {
   const handleDeleteStudent = async (id: number) => { 
     if (confirm("คุณแน่ใจหรือไม่ที่จะลบนักเรียนคนนี้? ข้อมูลและคะแนนสอบทั้งหมดจะหายไปอย่างถาวร!")) { 
       const { error } = await supabase.from('students').delete().eq('id', id);
-      if (!error) { fetchStudents(); if (selectedStudent?.id === id) setSelectedStudent(null); }
+      await supabase.from('exam_submissions').delete().eq('student_id', id);
+      if (!error) { 
+        fetchStudents(); 
+        if (selectedStudent?.id === id) setSelectedStudent(null); 
+      }
     } 
+  };
+
+  const handleDeleteAllStudents = async () => {
+    if (students.length === 0) return alert("ไม่มีข้อมูลนักเรียนในระบบ");
+    const confirmName = prompt("🚨 คำเตือนขั้นสูง: คุณกำลังจะลบนักเรียนทุกคนและผลสอบทั้งหมดในระบบอย่างถาวร!\n\nพิมพ์คำว่า 'DELETE ALL' เพื่อยืนยัน:");
+    if (confirmName !== "DELETE ALL") return;
+
+    const { error } = await supabase.from('students').delete().neq('id', 0);
+    await supabase.from('exam_submissions').delete().neq('id', 0);
+
+    if (error) {
+      alert("เกิดข้อผิดพลาด: " + error.message);
+    } else {
+      alert("ลบข้อมูลนักเรียนทั้งหมดในระบบเรียบร้อยแล้ว");
+      setSelectedStudent(null);
+      fetchStudents();
+    }
+  };
+
+  const handleResetAllStudentsData = async () => {
+    if (students.length === 0) return alert("ไม่มีข้อมูลนักเรียนในระบบ");
+    if (!confirm("⚠️ คุณต้องการรีเซ็ตผลสอบ ประวัติ และคะแนนของนักเรียน 'ทุกคน' ใช่หรือไม่?\n\n* บัญชีและสิทธิ์จะยังคงอยู่\n* สถิติและประวัติสอบจะถูกเคลียร์เป็น 0 ทั้งหมด")) return;
+
+    const { error } = await supabase.from('students').update({
+      examHistory: [],
+      mistakeBank: [],
+      scores: { math: 0, english: 0, science: 0, thai: 0, social: 0 }
+    }).neq('id', 0);
+
+    await supabase.from('exam_submissions').delete().neq('id', 0);
+
+    if (error) {
+      alert("เกิดข้อผิดพลาด: " + error.message);
+    } else {
+      alert("รีเซ็ตผลสอบของนักเรียนทุกคนเรียบร้อยแล้ว");
+      fetchStudents();
+      if (selectedStudent) {
+        setSelectedStudent({
+          ...selectedStudent,
+          examHistory: [],
+          mistakeBank: [],
+          scores: { math: 0, english: 0, science: 0, thai: 0, social: 0 }
+        });
+      }
+    }
   };
 
   const handleDeleteStudentHistory = async (studentToUpdate: any, historyId: number, examId: number) => {
@@ -233,6 +483,7 @@ function AdminDashboard() {
     });
   };
 
+  // --- Lesson Actions ---
   const handleSaveLesson = async (e: React.FormEvent) => {
     e.preventDefault();
     if (lessonFormData.grade.length === 0) return alert("กรุณาเลือกระดับชั้นอย่างน้อย 1 รายการ");
@@ -267,6 +518,31 @@ function AdminDashboard() {
     }
   };
 
+  const handleDeleteFilteredLessons = async () => {
+    if (filteredLessons.length === 0) return alert("ไม่มีบทเรียนในหมวดหมู่นี้");
+    if (!confirm(`คุณต้องการลบบทเรียนในหมวด (${filterGrade} / ${filterProgram} / ${filterSubject}) ทั้งหมด ${filteredLessons.length} บทเรียนใช่หรือไม่?`)) return;
+
+    const ids = filteredLessons.map(l => l.id);
+    const { error } = await supabase.from('lessons').delete().in('id', ids);
+    if (error) alert("เกิดข้อผิดพลาด: " + error.message);
+    else {
+      alert("ลบบทเรียนในหมวดหมู่ที่เลือกเรียบร้อย");
+      fetchLessons();
+    }
+  };
+
+  const handleDeleteAllLessons = async () => {
+    if (lessons.length === 0) return alert("ไม่มีบทเรียนในระบบ");
+    if (!confirm("🚨 ต้องการลบบทเรียน 'ทั้งหมดในระบบ' หรือไม่?")) return;
+    const { error } = await supabase.from('lessons').delete().neq('id', 0);
+    if (error) alert("เกิดข้อผิดพลาด: " + error.message);
+    else {
+      alert("ลบบทเรียนทั้งหมดเรียบร้อยแล้ว");
+      fetchLessons();
+    }
+  };
+
+  // --- Worksheet Actions ---
   const handleUploadWorksheetImages = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0) {
       setIsUploading(true);
@@ -289,8 +565,8 @@ function AdminDashboard() {
   };
 
   const handleSaveWorksheet = async () => {
-    if (!worksheetFormData.title) return alert("กรุณาใส่ชื่อชีทแบบฝึกหัด");
-    if (worksheetFormData.pages.length === 0) return alert("กรุณาอัปโหลดรูปชีทอย่างน้อย 1 หน้า");
+    if (!worksheetFormData.title) return alert("กรุณาใส่ชื่อชุดแบบฝึกหัด");
+    if (worksheetFormData.pages.length === 0) return alert("กรุณาอัปโหลดรูปภาพแบบฝึกหัดอย่างน้อย 1 หน้า");
     const payload = {
       title: worksheetFormData.title,
       grade: worksheetFormData.grade.join(", "),
@@ -299,9 +575,9 @@ function AdminDashboard() {
       pages: worksheetFormData.pages
     };
     const { error } = await supabase.from('worksheets').insert([payload]);
-    if (error) alert("เกิดข้อผิดพลาดในการบันทึกชีท: " + error.message);
+    if (error) alert("เกิดข้อผิดพลาดในการบันทึกแบบฝึกหัด: " + error.message);
     else {
-      alert("เพิ่มชีทแบบฝึกหัดเข้าระบบสำเร็จ!");
+      alert("เพิ่มแบบฝึกหัดเข้าระบบสำเร็จ!");
       setShowWorksheetModal(false);
       setWorksheetFormData({ title: "", grade: ["ป.6"], program: ["ISM"], subject: "คณิตศาสตร์", pages: [] });
       fetchWorksheets();
@@ -309,19 +585,37 @@ function AdminDashboard() {
   };
 
   const handleDeleteWorksheet = async (id: number) => {
-    if (confirm("ต้องการลบชีทชุดนี้ออกจากระบบ?")) {
+    if (confirm("ต้องการลบแบบฝึกหัดชุดนี้ออกจากระบบ?")) {
       const { error } = await supabase.from('worksheets').delete().eq('id', id);
       if (!error) fetchWorksheets();
     }
   };
 
-  const handleLogout = async () => {
-    if (confirm("คุณต้องการออกจากระบบใช่หรือไม่?")) {
-      await supabase.auth.signOut();
-      navigate({ to: "/login" });
+  const handleDeleteFilteredWorksheets = async () => {
+    if (filteredWorksheets.length === 0) return alert("ไม่มีแบบฝึกหัดในหมวดหมู่นี้");
+    if (!confirm(`คุณต้องการลบแบบฝึกหัดในหมวด (${filterGrade} / ${filterProgram} / ${filterSubject}) ทั้งหมด ${filteredWorksheets.length} ชุดใช่หรือไม่?`)) return;
+
+    const ids = filteredWorksheets.map(w => w.id);
+    const { error } = await supabase.from('worksheets').delete().in('id', ids);
+    if (error) alert("เกิดข้อผิดพลาด: " + error.message);
+    else {
+      alert("ลบแบบฝึกหัดในหมวดหมู่ที่เลือกเรียบร้อย");
+      fetchWorksheets();
     }
   };
 
+  const handleDeleteAllWorksheets = async () => {
+    if (worksheets.length === 0) return alert("ไม่มีแบบฝึกหัดในระบบ");
+    if (!confirm("🚨 ต้องการลบแบบฝึกหัด 'ทั้งหมดในระบบ' หรือไม่?")) return;
+    const { error } = await supabase.from('worksheets').delete().neq('id', 0);
+    if (error) alert("เกิดข้อผิดพลาด: " + error.message);
+    else {
+      alert("ลบแบบฝึกหัดทั้งหมดเรียบร้อยแล้ว");
+      fetchWorksheets();
+    }
+  };
+
+  // --- Exam Actions ---
   const handleOpenEditExam = (exam: any) => {
     setEditingExamId(exam.id);
     
@@ -335,7 +629,8 @@ function AdminDashboard() {
       subject: exam.subject,
       year: exam.year || "2566",
       is_timed: exam.is_timed !== false,
-      duration_minutes: exam.duration_minutes || 90
+      duration_minutes: exam.duration_minutes || 90,
+      shuffle_questions: exam.shuffle_questions || false
     });
 
     const parsedQuestions: QuestionItem[] = (Array.isArray(exam.questions) ? exam.questions : []).map((q: any, idx: number) => ({
@@ -489,13 +784,12 @@ function AdminDashboard() {
     });
   };
 
-  // 💡 อัปเดตฟังก์ชันให้วิ่งไปที่ api/gemini
   const handleGenerateExplanation = async (qIndex: number) => {
     const q = manualQuestions[qIndex];
     if (!q) return; 
     
     if (!q.question && (!q.image_url || q.image_url === "NEEDS_IMAGE")) {
-      return alert("กรุณาพิมพ์โจทย์คำถามหรืออัปโหลดรูปภาพก่อนครับ เพื่อให้ AI รู้ว่าต้องเฉลยอะไร");
+      return alert("กรุณาพิมพ์โจทย์คำถามหรืออัปโหลดรูปภาพก่อน เพื่อให้ AI รู้ว่าต้องเฉลยอะไร");
     }
 
     setGeneratingExpId(qIndex);
@@ -525,12 +819,11 @@ function AdminDashboard() {
         }
       }
 
-      // ✅ ยิงไปที่หลังบ้านของเราแทน (ซ่อน API Key ไว้ที่ Vercel)
       const response = await fetch(`/api/gemini`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          model: q.image_url && q.image_url !== "NEEDS_IMAGE" ? "gemini-1.5-pro" : "gemini-1.5-flash", 
+          model: "gemini-2.5-flash", 
           contents: [{ parts: requestParts }]
         })
       });
@@ -540,7 +833,7 @@ function AdminDashboard() {
       if (response.ok && data.candidates?.[0]?.content?.parts?.[0]?.text) {
          updateQuestionExplanation(qIndex, data.candidates[0].content.parts[0].text.trim());
       } else {
-         throw new Error(data.error?.message || "ไม่สามารถเชื่อมต่อกับ Google AI ได้ในขณะนี้");
+         throw new Error(data.error?.message || "ไม่สามารถเชื่อมต่อกับ AI ได้ในขณะนี้");
       }
 
     } catch (error: any) {
@@ -561,7 +854,6 @@ function AdminDashboard() {
 
   const removeImage = (indexToRemove: number) => setPreviewImages(prev => prev.filter((_, index) => index !== indexToRemove));
 
-  // 💡 อัปเดตฟังก์ชันให้วิ่งไปที่ api/gemini
   const processImageWithAI = async () => {
     if (previewImages.length === 0) return;
     setIsAiProcessing(true);
@@ -593,12 +885,11 @@ function AdminDashboard() {
 3. หากเฉลยในรูปมีการโยงลูกศรแบบรูปภาพ (เช่น อนุกรมตัวเลข) ให้เขียนอธิบายเป็น text ในช่อง explanation แทนการแปลงเป็นเครื่องหมายแปลกๆ
 4. ตอบกลับมาเป็นโครงสร้าง JSON เพียวๆ เท่านั้น ห้ามใส่ markdown code block`;
 
-      // ✅ ยิงไปที่หลังบ้านของเราแทน (ซ่อน API Key ไว้ที่ Vercel)
       const response = await fetch(`/api/gemini`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          model: "gemini-1.5-pro", 
+          model: "gemini-2.5-flash", 
           contents: [{ parts: [{ text: promptText }, ...imageParts] }]
         })
       });
@@ -630,7 +921,7 @@ function AdminDashboard() {
         setAiResult(formatted);
         setExamModalMode("ai_result");
       } else {
-        throw new Error(data.error?.message || "ไม่สามารถเชื่อมต่อกับ Google AI ได้ในขณะนี้");
+        throw new Error(data.error?.message || "ไม่สามารถเชื่อมต่อกับ AI ได้ในขณะนี้");
       }
 
     } catch (error: any) {
@@ -666,6 +957,7 @@ function AdminDashboard() {
       year: newExamInfo.year,
       is_timed: newExamInfo.is_timed,
       duration_minutes: newExamInfo.duration_minutes,
+      shuffle_questions: newExamInfo.shuffle_questions,
       questions: finalQuestions,
       total_questions: finalQuestions.length,
       status: "published"
@@ -696,7 +988,41 @@ function AdminDashboard() {
   const handleDeleteExam = async (id: number) => {
     if (confirm("ลบข้อสอบชุดนี้ออกจากระบบอย่างถาวรหรือไม่?")) {
       const { error } = await supabase.from('exams').delete().eq('id', id);
+      await supabase.from('exam_submissions').delete().eq('exam_id', id);
       if (!error) fetchExams();
+    }
+  };
+
+  const handleDeleteFilteredExams = async () => {
+    if (filteredExams.length === 0) return alert("ไม่มีข้อสอบในหมวดหมู่นี้");
+    if (!confirm(`คุณต้องการลบข้อสอบในหมวด (${filterGrade} / ${filterProgram} / ${filterSubject}) ทั้งหมด ${filteredExams.length} ชุดใช่หรือไม่?`)) return;
+
+    const ids = filteredExams.map(e => e.id);
+    const { error } = await supabase.from('exams').delete().in('id', ids);
+    await supabase.from('exam_submissions').delete().in('exam_id', ids);
+    if (error) alert("เกิดข้อผิดพลาด: " + error.message);
+    else {
+      alert("ลบข้อสอบในหมวดหมู่ที่เลือกเรียบร้อย");
+      fetchExams();
+    }
+  };
+
+  const handleDeleteAllExams = async () => {
+    if (exams.length === 0) return alert("ไม่มีข้อสอบในระบบ");
+    if (!confirm("🚨 ต้องการลบข้อสอบ 'ทั้งหมดในระบบ' หรือไม่? ผลคะแนนและประวัติการสอบที่ผูกกันจะหายไปทั้งหมด!")) return;
+    const { error } = await supabase.from('exams').delete().neq('id', 0);
+    await supabase.from('exam_submissions').delete().neq('id', 0);
+    if (error) alert("เกิดข้อผิดพลาด: " + error.message);
+    else {
+      alert("ลบข้อสอบทั้งหมดเรียบร้อยแล้ว");
+      fetchExams();
+    }
+  };
+
+  const handleLogout = async () => {
+    if (confirm("คุณต้องการออกจากระบบใช่หรือไม่?")) {
+      await supabase.auth.signOut();
+      navigate({ to: "/login" });
     }
   };
 
@@ -711,7 +1037,7 @@ function AdminDashboard() {
     if (!itemSubject) return false;
     const cleanItem = itemSubject.trim().toLowerCase();
     const cleanFilter = filterSub.trim().toLowerCase();
-    return cleanItem.includes(cleanFilter) || cleanFilter.includes(cleanItem);
+    return cleanItem === cleanFilter || cleanItem.includes(cleanFilter);
   };
 
   const filteredExams = exams.filter(exam => {
@@ -736,22 +1062,24 @@ function AdminDashboard() {
 
   return (
     <div className="flex min-h-screen w-full bg-slate-50 text-slate-900 font-sans">
+      {/* Sidebar Navigation */}
       <aside className="hidden w-64 flex-col border-r bg-white p-6 md:flex shadow-sm">
         <div className="flex-1">
-          <h2 className="mb-8 text-2xl font-bold text-primary flex items-center gap-2">
+          <h2 className="mb-8 text-2xl font-black text-primary flex items-center gap-2">
             <BookOpen className="size-6" /> คลังสอบ Admin
           </h2>
-          <nav className="flex flex-col space-y-2">
-            <button onClick={() => setActiveTab("dashboard")} className={`flex items-center gap-3 rounded-xl p-3 font-medium transition-all ${activeTab === "dashboard" ? "bg-primary/10 text-primary font-bold shadow-sm" : "text-slate-500 hover:bg-slate-100"}`}><LayoutDashboard className="size-5" /> ภาพรวมระบบ</button>
-            <button onClick={() => setActiveTab("lessons")} className={`flex items-center gap-3 rounded-xl p-3 font-medium transition-all ${activeTab === "lessons" ? "bg-primary/10 text-primary font-bold shadow-sm" : "text-slate-500 hover:bg-slate-100"}`}><GraduationCap className="size-5" /> จัดการเนื้อหาบทเรียน</button>
-            <button onClick={() => setActiveTab("exams")} className={`flex items-center gap-3 rounded-xl p-3 font-medium transition-all ${activeTab === "exams" ? "bg-primary/10 text-primary font-bold shadow-sm" : "text-slate-500 hover:bg-slate-100"}`}><BookOpen className="size-5" /> จัดการข้อสอบ</button>
-            <button onClick={() => setActiveTab("worksheets")} className={`flex items-center gap-3 rounded-xl p-3 font-medium transition-all ${activeTab === "worksheets" ? "bg-primary/10 text-primary font-bold shadow-sm" : "text-slate-500 hover:bg-slate-100"}`}><FilePenLine className="size-5" /> จัดการชีทแบบฝึกหัด</button>
-            <button onClick={() => setActiveTab("users")} className={`flex items-center gap-3 rounded-xl p-3 font-medium transition-all ${activeTab === "users" ? "bg-primary/10 text-primary font-bold shadow-sm" : "text-slate-500 hover:bg-slate-100"}`}><Users className="size-5" /> จัดการผู้ใช้งาน</button>
+          <nav className="flex flex-col space-y-1.5">
+            <button onClick={() => setActiveTab("dashboard")} className={`flex items-center gap-3 rounded-2xl p-3 font-bold transition-all ${activeTab === "dashboard" ? "bg-primary/10 text-primary shadow-sm" : "text-slate-500 hover:bg-slate-100"}`}><LayoutDashboard className="size-5" /> ภาพรวมระบบ</button>
+            <button onClick={() => setActiveTab("lessons")} className={`flex items-center gap-3 rounded-2xl p-3 font-bold transition-all ${activeTab === "lessons" ? "bg-primary/10 text-primary shadow-sm" : "text-slate-500 hover:bg-slate-100"}`}><GraduationCap className="size-5" /> จัดการเนื้อหาบทเรียน</button>
+            <button onClick={() => setActiveTab("exams")} className={`flex items-center gap-3 rounded-2xl p-3 font-bold transition-all ${activeTab === "exams" ? "bg-primary/10 text-primary shadow-sm" : "text-slate-500 hover:bg-slate-100"}`}><BookOpen className="size-5" /> จัดการข้อสอบ</button>
+            <button onClick={() => setActiveTab("worksheets")} className={`flex items-center gap-3 rounded-2xl p-3 font-bold transition-all ${activeTab === "worksheets" ? "bg-primary/10 text-primary shadow-sm" : "text-slate-500 hover:bg-slate-100"}`}><FilePenLine className="size-5" /> จัดการแบบฝึกหัด</button>
+            <button onClick={() => setActiveTab("users")} className={`flex items-center gap-3 rounded-2xl p-3 font-bold transition-all ${activeTab === "users" ? "bg-primary/10 text-primary shadow-sm" : "text-slate-500 hover:bg-slate-100"}`}><Users className="size-5" /> จัดการผู้ใช้งาน</button>
+            <button onClick={() => setActiveTab("codes")} className={`flex items-center gap-3 rounded-2xl p-3 font-bold transition-all ${activeTab === "codes" ? "bg-primary/10 text-primary shadow-sm" : "text-slate-500 hover:bg-slate-100"}`}><Key className="size-5" /> รหัสปลดล็อกสิทธิ์</button>
           </nav>
         </div>
         
         <div className="mt-auto pt-6 border-t border-slate-100">
-          <button onClick={handleLogout} className="flex w-full items-center gap-3 rounded-xl p-3 font-medium text-red-500 transition-colors hover:bg-red-50">
+          <button onClick={handleLogout} className="flex w-full items-center gap-3 rounded-2xl p-3 font-bold text-red-500 transition-colors hover:bg-red-50">
             <LogOut className="size-5" /> ออกจากระบบ
           </button>
         </div>
@@ -759,24 +1087,25 @@ function AdminDashboard() {
 
       <main className="flex-1 p-6 md:p-10 w-full overflow-x-hidden relative h-screen overflow-y-auto">
         <div className="mb-8 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-          <h1 className="text-3xl font-bold text-slate-800">
+          <h1 className="text-3xl font-black text-slate-800 tracking-tight">
             {activeTab === "dashboard" && "Dashboard (ภาพรวมระบบ)"}
             {activeTab === "lessons" && "จัดการเนื้อหาบทเรียน"}
             {activeTab === "exams" && "จัดการชุดข้อสอบ"}
-            {activeTab === "worksheets" && "จัดการชีทแบบฝึกหัด"}
+            {activeTab === "worksheets" && "จัดการแบบฝึกหัด"}
             {activeTab === "users" && "จัดการผู้ใช้งาน"}
+            {activeTab === "codes" && "จัดการรหัสปลดล็อกสิทธิ์ (Access Codes)"}
           </h1>
 
           {activeTab === "exams" && (
             <button 
               onClick={() => { 
                 setEditingExamId(null);
-                setNewExamInfo({ title: "", grade: [filterGrade], program: [filterProgram], subject: filterSubject === "ทั้งหมด" ? "คณิตศาสตร์" : filterSubject, year: "2566", is_timed: true, duration_minutes: 90 });
+                setNewExamInfo({ title: "", grade: [filterGrade], program: [filterProgram], subject: filterSubject === "ทั้งหมด" ? "คณิตศาสตร์" : filterSubject, year: "2566", is_timed: true, duration_minutes: 90, shuffle_questions: false });
                 setExamModalMode("exam_info"); 
                 setPreviewImages([]); 
                 setManualQuestions([{ id: 1, type: "choice", question: "", image_url: "", options: ["", "", "", ""], correct_index: 0, subjective_answers: [""], explanation: "" }]);
               }}
-              className="flex items-center justify-center gap-2 rounded-xl bg-primary px-5 py-2.5 text-white font-semibold hover:bg-primary/90 transition shadow-sm"
+              className="flex items-center justify-center gap-2 rounded-2xl bg-primary px-5 py-2.5 text-white font-bold hover:bg-primary/90 transition shadow-sm"
             >
               <PlusCircle className="size-5" /> เพิ่มข้อสอบใหม่
             </button>
@@ -788,7 +1117,7 @@ function AdminDashboard() {
                 setLessonFormData({ id: 0, title: "", grade: [filterGrade], program: [filterProgram], subject: filterSubject === "ทั้งหมด" ? "คณิตศาสตร์" : filterSubject, video_url: "", pdf_url: "", description: "" });
                 setShowLessonModal(true);
               }}
-              className="flex items-center justify-center gap-2 rounded-xl bg-primary px-5 py-2.5 text-white font-semibold hover:bg-primary/90 transition shadow-sm"
+              className="flex items-center justify-center gap-2 rounded-2xl bg-primary px-5 py-2.5 text-white font-bold hover:bg-primary/90 transition shadow-sm"
             >
               <PlusCircle className="size-5" /> เพิ่มบทเรียนใหม่
             </button>
@@ -797,26 +1126,29 @@ function AdminDashboard() {
           {activeTab === "worksheets" && (
             <button 
               onClick={() => setShowWorksheetModal(true)}
-              className="flex items-center justify-center gap-2 rounded-xl bg-primary px-5 py-2.5 text-white font-semibold hover:bg-primary/90 transition shadow-sm"
+              className="flex items-center justify-center gap-2 rounded-2xl bg-primary px-5 py-2.5 text-white font-bold hover:bg-primary/90 transition shadow-sm"
             >
-              <PlusCircle className="size-5" /> อัปโหลดชีทใหม่
+              <PlusCircle className="size-5" /> เพิ่มแบบฝึกหัดใหม่
             </button>
           )}
         </div>
 
+        {/* Tab 1: Dashboard */}
         {activeTab === "dashboard" && (
           <div className="animate-in fade-in slide-in-from-bottom-2 duration-300">
-            <div className="mb-10 grid grid-cols-1 gap-6 sm:grid-cols-3">
-              <div className="rounded-2xl border bg-white p-6 shadow-sm"><p className="text-sm font-medium text-slate-500">จำนวนนักเรียนทั้งหมด</p><p className="mt-2 text-3xl font-bold text-slate-800">{students.length} <span className="text-base font-normal text-slate-500">คน</span></p></div>
-              <div className="rounded-2xl border bg-white p-6 shadow-sm"><p className="text-sm font-medium text-slate-500">จำนวนข้อสอบ</p><p className="mt-2 text-3xl font-bold text-slate-800">{exams.length} <span className="text-base font-normal text-slate-500">ชุด</span></p></div>
-              <div className="rounded-2xl border bg-white p-6 shadow-sm"><p className="text-sm font-medium text-slate-500">จำนวนบทเรียน</p><p className="mt-2 text-3xl font-bold text-slate-800">{lessons.length} <span className="text-base font-normal text-slate-500">บทเรียน</span></p></div>
+            <div className="mb-10 grid grid-cols-1 gap-6 sm:grid-cols-4">
+              <div className="rounded-3xl border bg-white p-6 shadow-sm"><p className="text-xs font-bold text-slate-400 uppercase">นักเรียนทั้งหมด</p><p className="mt-2 text-3xl font-black text-slate-800">{students.length} <span className="text-sm font-semibold text-slate-400">คน</span></p></div>
+              <div className="rounded-3xl border bg-white p-6 shadow-sm"><p className="text-xs font-bold text-slate-400 uppercase">จำนวนข้อสอบ</p><p className="mt-2 text-3xl font-black text-slate-800">{exams.length} <span className="text-sm font-semibold text-slate-400">ชุด</span></p></div>
+              <div className="rounded-3xl border bg-white p-6 shadow-sm"><p className="text-xs font-bold text-slate-400 uppercase">จำนวนบทเรียน</p><p className="mt-2 text-3xl font-black text-slate-800">{lessons.length} <span className="text-sm font-semibold text-slate-400">บทเรียน</span></p></div>
+              <div className="rounded-3xl border bg-white p-6 shadow-sm"><p className="text-xs font-bold text-slate-400 uppercase">แบบฝึกหัด</p><p className="mt-2 text-3xl font-black text-slate-800">{worksheets.length} <span className="text-sm font-semibold text-slate-400">ชุด</span></p></div>
             </div>
           </div>
         )}
 
+        {/* Tab 2: Lessons */}
         {activeTab === "lessons" && (
           <div className="animate-in fade-in slide-in-from-bottom-2 duration-300">
-            <div className="bg-white p-6 rounded-2xl border shadow-sm mb-6 space-y-4">
+            <div className="bg-white p-6 rounded-3xl border shadow-sm mb-6 space-y-4">
               <div className="flex items-center gap-3 border-b pb-4"><Filter className="size-5 text-primary" /><h3 className="font-bold text-slate-800">หมวดหมู่บทเรียน</h3></div>
               <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-6">
                 <span className="font-semibold text-slate-700 w-24">ระดับชั้น:</span>
@@ -832,10 +1164,20 @@ function AdminDashboard() {
               </div>
             </div>
 
-            <div className="rounded-2xl border bg-white shadow-sm overflow-hidden">
-              <div className="border-b bg-slate-50/70 p-4 flex justify-between items-center">
-                <h3 className="font-bold text-lg text-slate-800">บทเรียน: {filterGrade} / {filterProgram} {filterSubject !== "ทั้งหมด" ? `/ ${filterSubject}` : ""}</h3>
-                <span className="text-sm font-medium bg-primary/10 text-primary px-3 py-1 rounded-full">พบ {filteredLessons.length} บทเรียน</span>
+            <div className="rounded-3xl border bg-white shadow-sm overflow-hidden">
+              <div className="border-b bg-slate-50/70 p-4 flex flex-wrap justify-between items-center gap-3">
+                <div>
+                  <h3 className="font-bold text-lg text-slate-800">บทเรียน: {filterGrade} / {filterProgram} {filterSubject !== "ทั้งหมด" ? `/ ${filterSubject}` : ""}</h3>
+                  <span className="text-xs font-semibold text-primary">พบ {filteredLessons.length} บทเรียนในหมวดนี้</span>
+                </div>
+                <div className="flex gap-2">
+                  <button onClick={handleDeleteFilteredLessons} className="px-3 py-1.5 rounded-xl border border-rose-200 bg-rose-50 hover:bg-rose-100 text-rose-600 text-xs font-bold transition flex items-center gap-1.5">
+                    <Trash2 className="size-3.5" /> ลบเฉพาะหมวดนี้
+                  </button>
+                  <button onClick={handleDeleteAllLessons} className="px-3 py-1.5 rounded-xl border border-rose-300 bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold transition flex items-center gap-1.5">
+                    <AlertOctagon className="size-3.5" /> ลบทั้งหมดในระบบ
+                  </button>
+                </div>
               </div>
               <div className="overflow-x-auto">
                 <table className="w-full text-left text-sm">
@@ -865,8 +1207,8 @@ function AdminDashboard() {
                                   program: safeGetArray(lesson.program).length > 0 ? safeGetArray(lesson.program) : ["ISM"]
                                 }); 
                                 setShowLessonModal(true); 
-                              }} className="p-2 text-slate-400 hover:text-primary transition-colors border rounded-lg bg-white shadow-sm" title="แก้ไขบทเรียน"><Edit className="size-4"/></button>
-                              <button onClick={() => handleDeleteLesson(lesson.id)} className="p-2 text-slate-400 hover:text-red-500 transition-colors border rounded-lg bg-white shadow-sm" title="ลบบบทเรียน"><Trash2 className="size-4"/></button>
+                              }} className="p-2 text-slate-400 hover:text-primary transition-colors border rounded-xl bg-white shadow-sm" title="แก้ไขบทเรียน"><Edit className="size-4"/></button>
+                              <button onClick={() => handleDeleteLesson(lesson.id)} className="p-2 text-slate-400 hover:text-red-500 transition-colors border rounded-xl bg-white shadow-sm" title="ลบบทเรียน"><Trash2 className="size-4"/></button>
                             </div>
                           </td>
                         </tr>
@@ -881,9 +1223,10 @@ function AdminDashboard() {
           </div>
         )}
 
+        {/* Tab 3: Exams */}
         {activeTab === "exams" && (
           <div className="animate-in fade-in slide-in-from-bottom-2 duration-300">
-            <div className="bg-white p-6 rounded-2xl border shadow-sm mb-6 space-y-4">
+            <div className="bg-white p-6 rounded-3xl border shadow-sm mb-6 space-y-4">
               <div className="flex items-center gap-3 border-b pb-4"><Filter className="size-5 text-primary" /><h3 className="font-bold text-slate-800">หมวดหมู่ข้อสอบ</h3></div>
               <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-6">
                 <span className="font-semibold text-slate-700 w-24">ระดับชั้น:</span>
@@ -899,15 +1242,25 @@ function AdminDashboard() {
               </div>
             </div>
 
-            <div className="rounded-2xl border bg-white shadow-sm overflow-hidden">
-              <div className="border-b bg-slate-50/70 p-4 flex justify-between items-center">
-                <h3 className="font-bold text-lg text-slate-800">ข้อสอบ: {filterGrade} / {filterProgram} {filterSubject !== "ทั้งหมด" ? `/ ${filterSubject}` : ""}</h3>
-                <span className="text-sm font-medium bg-primary/10 text-primary px-3 py-1 rounded-full">พบ {filteredExams.length} รายการ</span>
+            <div className="rounded-3xl border bg-white shadow-sm overflow-hidden">
+              <div className="border-b bg-slate-50/70 p-4 flex flex-wrap justify-between items-center gap-3">
+                <div>
+                  <h3 className="font-bold text-lg text-slate-800">ข้อสอบ: {filterGrade} / {filterProgram} {filterSubject !== "ทั้งหมด" ? `/ ${filterSubject}` : ""}</h3>
+                  <span className="text-xs font-semibold text-primary">พบ {filteredExams.length} รายการ</span>
+                </div>
+                <div className="flex gap-2">
+                  <button onClick={handleDeleteFilteredExams} className="px-3 py-1.5 rounded-xl border border-rose-200 bg-rose-50 hover:bg-rose-100 text-rose-600 text-xs font-bold transition flex items-center gap-1.5">
+                    <Trash2 className="size-3.5" /> ลบเฉพาะหมวดนี้
+                  </button>
+                  <button onClick={handleDeleteAllExams} className="px-3 py-1.5 rounded-xl border border-rose-300 bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold transition flex items-center gap-1.5">
+                    <AlertOctagon className="size-3.5" /> ลบทั้งหมดในระบบ
+                  </button>
+                </div>
               </div>
               <div className="overflow-x-auto">
                 <table className="w-full text-left text-sm">
                   <thead className="border-b text-slate-500 bg-white">
-                    <tr><th className="p-4 font-medium">ชื่อชุดข้อสอบ</th><th className="p-4 font-medium">รายวิชา</th><th className="p-4 font-medium">ปีการศึกษา</th><th className="p-4 font-medium text-center">เวลาสอบ</th><th className="p-4 font-medium text-center">จำนวนข้อ</th><th className="p-4 font-medium">สถานะ</th><th className="p-4 font-medium">จัดการ</th></tr>
+                    <tr><th className="p-4 font-medium">ชื่อชุดข้อสอบ</th><th className="p-4 font-medium">รายวิชา</th><th className="p-4 font-medium">ปีการศึกษา</th><th className="p-4 font-medium text-center">เวลาสอบ</th><th className="p-4 font-medium text-center">สลับข้อ</th><th className="p-4 font-medium text-center">จำนวนข้อ</th><th className="p-4 font-medium">สถานะ</th><th className="p-4 font-medium">จัดการ</th></tr>
                   </thead>
                   <tbody className="divide-y">
                     {filteredExams.length > 0 ? (
@@ -923,18 +1276,24 @@ function AdminDashboard() {
                           <td className="p-4 text-slate-600">{exam.subject}</td>
                           <td className="p-4 text-slate-600">{exam.year}</td>
                           <td className="p-4 text-slate-600 text-center font-medium">{exam.is_timed === false ? "-" : `${exam.duration_minutes || 90} นาที`}</td>
+                          <td className="p-4 text-slate-600 text-center">
+                            {exam.shuffle_questions ? <span className="text-[10px] bg-teal-50 text-teal-700 font-bold px-2 py-0.5 rounded border border-teal-200">เปิดสลับ</span> : "-"}
+                          </td>
                           <td className="p-4 text-slate-600 text-center font-medium bg-slate-50/50">{exam.total_questions}</td>
                           <td className="p-4"><span className={`inline-flex px-2.5 py-1 rounded-full text-xs font-semibold border ${exam.status === 'published' ? 'bg-green-50 text-green-700 border-green-200' : 'bg-slate-100 text-slate-600 border-slate-200'}`}>{exam.status === 'published' ? 'พร้อมใช้งาน' : 'ฉบับร่าง'}</span></td>
                           <td className="p-4">
-                            <div className="flex gap-2">
-                              <button onClick={() => handleOpenEditExam(exam)} className="p-2 text-slate-400 hover:text-primary transition-colors border rounded-lg bg-white shadow-sm" title="แก้ไขข้อสอบ"><Edit className="size-4"/></button>
-                              <button onClick={() => handleDeleteExam(exam.id)} className="p-2 text-slate-400 hover:text-red-500 transition-colors border rounded-lg bg-white shadow-sm" title="ลบข้อสอบ"><Trash2 className="size-4"/></button>
+                            <div className="flex flex-wrap gap-1.5">
+                              <button onClick={() => handleExportWord(exam, false)} className="p-2 text-slate-400 hover:text-blue-600 transition-colors border rounded-xl bg-white shadow-sm" title="Export Word (ฉบับนักเรียน)"><FileDown className="size-4"/></button>
+                              <button onClick={() => handleExportWord(exam, true)} className="p-2 text-slate-400 hover:text-emerald-600 transition-colors border rounded-xl bg-white shadow-sm" title="Export Word (ฉบับครู พร้อมเฉลย)"><Download className="size-4"/></button>
+                              <button onClick={() => handleDuplicateExam(exam)} className="p-2 text-slate-400 hover:text-indigo-600 transition-colors border rounded-xl bg-white shadow-sm" title="คัดลอกชุดข้อสอบนี้"><Copy className="size-4"/></button>
+                              <button onClick={() => handleOpenEditExam(exam)} className="p-2 text-slate-400 hover:text-primary transition-colors border rounded-xl bg-white shadow-sm" title="แก้ไขข้อสอบ"><Edit className="size-4"/></button>
+                              <button onClick={() => handleDeleteExam(exam.id)} className="p-2 text-slate-400 hover:text-red-500 transition-colors border rounded-xl bg-white shadow-sm" title="ลบข้อสอบ"><Trash2 className="size-4"/></button>
                             </div>
                           </td>
                         </tr>
                       ))
                     ) : (
-                      <tr><td colSpan={7} className="p-12 text-center text-slate-400"><BookOpen className="size-10 mx-auto mb-3 opacity-25" /><p>ยังไม่มีข้อมูลข้อสอบในหมวดหมู่นี้</p></td></tr>
+                      <tr><td colSpan={8} className="p-12 text-center text-slate-400"><BookOpen className="size-10 mx-auto mb-3 opacity-25" /><p>ยังไม่มีข้อมูลข้อสอบในหมวดหมู่นี้</p></td></tr>
                     )}
                   </tbody>
                 </table>
@@ -943,10 +1302,11 @@ function AdminDashboard() {
           </div>
         )}
 
+        {/* Tab 4: Worksheets */}
         {activeTab === "worksheets" && (
           <div className="animate-in fade-in slide-in-from-bottom-2 duration-300">
-            <div className="bg-white p-6 rounded-2xl border shadow-sm mb-6 space-y-4">
-              <div className="flex items-center gap-3 border-b pb-4"><Filter className="size-5 text-primary" /><h3 className="font-bold text-slate-800">หมวดหมู่ชีท</h3></div>
+            <div className="bg-white p-6 rounded-3xl border shadow-sm mb-6 space-y-4">
+              <div className="flex items-center gap-3 border-b pb-4"><Filter className="size-5 text-primary" /><h3 className="font-bold text-slate-800">หมวดหมู่แบบฝึกหัด</h3></div>
               <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-6">
                 <span className="font-semibold text-slate-700 w-24">ระดับชั้น:</span>
                 <div className="flex flex-wrap gap-2">{["ป.4", "ป.5", "ป.6"].map(grade => (<button key={grade} onClick={() => setFilterGrade(grade)} className={`px-5 py-1.5 rounded-full text-sm font-medium transition-colors border ${filterGrade === grade ? 'bg-primary text-white border-primary shadow-sm' : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'}`}>{grade}</button>))}</div>
@@ -961,15 +1321,25 @@ function AdminDashboard() {
               </div>
             </div>
 
-            <div className="rounded-2xl border bg-white shadow-sm overflow-hidden">
-              <div className="border-b bg-slate-50/70 p-4 flex justify-between items-center">
-                <h3 className="font-bold text-lg text-slate-800">รายการชีท</h3>
-                <span className="text-sm font-medium bg-primary/10 text-primary px-3 py-1 rounded-full">พบ {filteredWorksheets.length} รายการ</span>
+            <div className="rounded-3xl border bg-white shadow-sm overflow-hidden">
+              <div className="border-b bg-slate-50/70 p-4 flex flex-wrap justify-between items-center gap-3">
+                <div>
+                  <h3 className="font-bold text-lg text-slate-800">รายการแบบฝึกหัด</h3>
+                  <span className="text-xs font-semibold text-primary">พบ {filteredWorksheets.length} รายการ</span>
+                </div>
+                <div className="flex gap-2">
+                  <button onClick={handleDeleteFilteredWorksheets} className="px-3 py-1.5 rounded-xl border border-rose-200 bg-rose-50 hover:bg-rose-100 text-rose-600 text-xs font-bold transition flex items-center gap-1.5">
+                    <Trash2 className="size-3.5" /> ลบเฉพาะหมวดนี้
+                  </button>
+                  <button onClick={handleDeleteAllWorksheets} className="px-3 py-1.5 rounded-xl border border-rose-300 bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold transition flex items-center gap-1.5">
+                    <AlertOctagon className="size-3.5" /> ลบทั้งหมดในระบบ
+                  </button>
+                </div>
               </div>
               <div className="overflow-x-auto">
                 <table className="w-full text-left text-sm">
                   <thead className="border-b text-slate-500 bg-white">
-                    <tr><th className="p-4 font-medium">ชื่อชุดชีทแบบฝึกหัด</th><th className="p-4 font-medium">วิชา</th><th className="p-4 font-medium">จำนวนหน้า</th><th className="p-4 font-medium">จัดการ</th></tr>
+                    <tr><th className="p-4 font-medium">ชื่อชุดแบบฝึกหัด</th><th className="p-4 font-medium">วิชา</th><th className="p-4 font-medium">จำนวนหน้า</th><th className="p-4 font-medium">จัดการ</th></tr>
                   </thead>
                   <tbody className="divide-y">
                     {filteredWorksheets.length > 0 ? (
@@ -985,12 +1355,15 @@ function AdminDashboard() {
                           <td className="p-4 text-slate-600">{ws.subject}</td>
                           <td className="p-4 text-slate-600">{ws.pages?.length || 0} หน้า</td>
                           <td className="p-4">
-                            <button onClick={() => handleDeleteWorksheet(ws.id)} className="p-2 text-slate-400 hover:text-red-500 border rounded-lg bg-white shadow-sm" title="ลบชีท"><Trash2 className="size-4"/></button>
+                            <div className="flex gap-2">
+                              <button onClick={() => handleDuplicateWorksheet(ws)} className="p-2 text-slate-400 hover:text-indigo-600 border rounded-xl bg-white shadow-sm" title="คัดลอกแบบฝึกหัดนี้"><Copy className="size-4"/></button>
+                              <button onClick={() => handleDeleteWorksheet(ws.id)} className="p-2 text-slate-400 hover:text-red-500 border rounded-xl bg-white shadow-sm" title="ลบแบบฝึกหัด"><Trash2 className="size-4"/></button>
+                            </div>
                           </td>
                         </tr>
                       ))
                     ) : (
-                      <tr><td colSpan={4} className="p-12 text-center text-slate-400">ยังไม่มีข้อมูลชีทในหมวดหมู่นี้</td></tr>
+                      <tr><td colSpan={4} className="p-12 text-center text-slate-400">ยังไม่มีข้อมูลแบบฝึกหัดในหมวดหมู่นี้</td></tr>
                     )}
                   </tbody>
                 </table>
@@ -999,21 +1372,40 @@ function AdminDashboard() {
           </div>
         )}
 
-        {/* 💡 อัปเดตส่วน USERS (เพิ่ม UI ให้ Admin ลบประวัติ หรือ Reset เด็กได้) */}
+        {/* Tab 5: Users */}
         {activeTab === "users" && (
           <div className="animate-in fade-in slide-in-from-bottom-2 duration-300">
+            {/* Top Bulk Action Bar for Users */}
+            <div className="bg-white p-4 rounded-3xl border shadow-sm mb-6 flex flex-wrap items-center justify-between gap-3">
+              <div className="flex items-center gap-2">
+                <Users className="size-5 text-primary" />
+                <span className="font-bold text-slate-800 text-sm">การจัดการนักเรียนทั้งหมด ({students.length} คน)</span>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <button onClick={handleExportCSV} className="px-3.5 py-2 rounded-2xl border border-teal-200 bg-teal-50 hover:bg-teal-100 text-teal-800 text-xs font-bold transition flex items-center gap-1.5 shadow-sm">
+                  <Download className="size-3.5" /> ส่งออก Excel (CSV)
+                </button>
+                <button onClick={handleResetAllStudentsData} className="px-3.5 py-2 rounded-2xl border border-amber-300 bg-amber-50 hover:bg-amber-100 text-amber-800 text-xs font-bold transition flex items-center gap-1.5 shadow-sm">
+                  <RefreshCw className="size-3.5" /> รีเซ็ตผลสอบทุกคน
+                </button>
+                <button onClick={handleDeleteAllStudents} className="px-3.5 py-2 rounded-2xl border border-rose-300 bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold transition flex items-center gap-1.5 shadow-sm">
+                  <AlertOctagon className="size-3.5" /> ลบนักเรียนทุกคน
+                </button>
+              </div>
+            </div>
+
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-              <div className="lg:col-span-4 rounded-2xl border bg-white shadow-sm p-5 flex flex-col h-[75vh]">
+              <div className="lg:col-span-4 rounded-3xl border bg-white shadow-sm p-5 flex flex-col h-[75vh]">
                 <div className="flex justify-between items-center mb-5">
                   <h3 className="font-bold text-lg text-slate-800">รายชื่อนักเรียน</h3>
-                  <button onClick={handleOpenAddStudent} className="flex items-center gap-1.5 text-xs bg-primary text-white px-3.5 py-2 rounded-xl font-semibold hover:bg-primary/90 transition shadow-sm"><PlusCircle className="size-4" /> เพิ่มนักเรียน</button>
+                  <button onClick={handleOpenAddStudent} className="flex items-center gap-1.5 text-xs bg-primary text-white px-3.5 py-2 rounded-2xl font-bold hover:bg-primary/90 transition shadow-sm"><PlusCircle className="size-4" /> เพิ่มนักเรียน</button>
                 </div>
                 <div className="space-y-2 overflow-y-auto pr-1 flex-1 custom-scrollbar">
                   {students.map((student) => (
-                    <div key={student.id} onClick={() => setSelectedStudent(student)} className={`flex items-center gap-3 p-3.5 border rounded-2xl cursor-pointer transition-all ${selectedStudent?.id === student.id ? 'border-primary bg-primary/5 ring-1 ring-primary/20' : 'hover:bg-slate-50 border-slate-200'}`}>
-                      <div className={`p-2.5 rounded-xl ${selectedStudent?.id === student.id ? 'bg-primary/20 text-primary' : 'bg-slate-100 text-slate-500'}`}><Users className="size-5"/></div>
+                    <div key={student.id} onClick={() => setSelectedStudent(student)} className={`flex items-center gap-3 p-3.5 border rounded-2xl cursor-pointer transition-all ${selectedStudent?.id === student.id ? 'border-primary bg-primary/5 ring-2 ring-primary/20' : 'hover:bg-slate-50 border-slate-200'}`}>
+                      <div className={`p-2.5 rounded-2xl ${selectedStudent?.id === student.id ? 'bg-primary/20 text-primary' : 'bg-slate-100 text-slate-500'}`}><Users className="size-5"/></div>
                       <div>
-                        <p className={`font-semibold text-sm ${selectedStudent?.id === student.id ? 'text-primary' : 'text-slate-800'}`}>{student.name}</p>
+                        <p className={`font-bold text-sm ${selectedStudent?.id === student.id ? 'text-primary' : 'text-slate-800'}`}>{student.name}</p>
                         <p className="text-xs text-slate-500 mt-0.5">
                           {getActivePermissionsText(student.permissions, ["ป.4", "ป.5", "ป.6"])} / {getActivePermissionsText(student.permissions, ["ISM", "EP", "ภาคปกติ"])}
                         </p>
@@ -1024,63 +1416,63 @@ function AdminDashboard() {
               </div>
 
               {selectedStudent ? (
-                <div className="lg:col-span-8 rounded-2xl border bg-white shadow-sm p-6 space-y-6">
+                <div className="lg:col-span-8 rounded-3xl border bg-white shadow-sm p-6 space-y-6">
                   <div className="flex justify-between items-start">
-                    <h3 className="font-bold text-lg text-slate-800 flex items-center gap-2"><BarChart3 className="size-5 text-primary"/> ข้อมูลและผลการเรียน</h3>
+                    <h3 className="font-black text-lg text-slate-800 flex items-center gap-2"><BarChart3 className="size-5 text-primary"/> ข้อมูลและผลการเรียน</h3>
                     <div className="flex gap-2">
-                      <button onClick={() => handleResetStudentData(selectedStudent)} className="p-2 text-slate-500 hover:text-amber-600 bg-slate-50 hover:bg-amber-50 rounded-xl transition-colors border shadow-sm" title="รีเซ็ตข้อมูลการสอบทั้งหมด"><RefreshCw className="size-4"/></button>
-                      <button onClick={() => handleOpenEditStudent(selectedStudent)} className="p-2 text-slate-500 hover:text-primary bg-slate-50 hover:bg-primary/10 rounded-xl transition-colors border shadow-sm" title="แก้ไขข้อมูลและสิทธิ์"><Edit className="size-4"/></button>
-                      <button onClick={() => handleDeleteStudent(selectedStudent.id)} className="p-2 text-slate-500 hover:text-red-500 bg-slate-50 hover:bg-red-50 rounded-xl transition-colors border shadow-sm" title="ลบนักเรียน"><Trash2 className="size-4"/></button>
+                      <button onClick={() => handleResetStudentData(selectedStudent)} className="p-2 text-slate-500 hover:text-amber-600 bg-slate-50 hover:bg-amber-50 rounded-2xl transition-colors border shadow-sm" title="รีเซ็ตผลสอบคนนี้"><RefreshCw className="size-4"/></button>
+                      <button onClick={() => handleOpenEditStudent(selectedStudent)} className="p-2 text-slate-500 hover:text-primary bg-slate-50 hover:bg-primary/10 rounded-2xl transition-colors border shadow-sm" title="แก้ไขข้อมูลและสิทธิ์"><Edit className="size-4"/></button>
+                      <button onClick={() => handleDeleteStudent(selectedStudent.id)} className="p-2 text-slate-500 hover:text-red-500 bg-slate-50 hover:bg-red-50 rounded-2xl transition-colors border shadow-sm" title="ลบนักเรียนคนนี้"><Trash2 className="size-4"/></button>
                     </div>
                   </div>
 
-                  <div className="bg-slate-50 p-6 rounded-2xl border border-slate-200/80 space-y-4">
+                  <div className="bg-slate-50 p-6 rounded-3xl border border-slate-200/80 space-y-4">
                     <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                       <div>
-                        <p className="text-2xl font-bold text-slate-800">{selectedStudent.name}</p>
-                        <p className="text-sm text-slate-500 mt-0.5">{selectedStudent.email} • {selectedStudent.phone || "ไม่ระบุเบอร์โทร"}</p>
+                        <p className="text-2xl font-black text-slate-800">{selectedStudent.name}</p>
+                        <p className="text-xs sm:text-sm text-slate-500 mt-0.5">{selectedStudent.email} • {selectedStudent.phone || "ไม่ระบุเบอร์โทร"}</p>
                       </div>
-                      <button onClick={() => handleOpenEditStudent(selectedStudent)} className="text-xs font-bold text-primary bg-white border border-primary/30 px-3.5 py-1.5 rounded-xl hover:bg-primary/5 transition self-start sm:self-auto">
+                      <button onClick={() => handleOpenEditStudent(selectedStudent)} className="text-xs font-bold text-primary bg-white border border-primary/30 px-3.5 py-1.5 rounded-2xl hover:bg-primary/5 transition self-start sm:self-auto">
                         แก้ไขสิทธิ์
                       </button>
                     </div>
 
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-3 border-t border-slate-200">
-                      <div className="bg-white p-3.5 rounded-xl border border-slate-200 space-y-1.5">
+                      <div className="bg-white p-3.5 rounded-2xl border border-slate-200 space-y-1.5">
                         <span className="text-xs font-semibold text-slate-500 flex items-center gap-1.5"><ShieldCheck className="size-3.5 text-primary" /> สิทธิ์ระดับชั้น:</span>
                         <p className="text-sm font-bold text-slate-800">{getActivePermissionsText(selectedStudent.permissions, ["ป.4", "ป.5", "ป.6"])}</p>
                       </div>
-                      <div className="bg-white p-3.5 rounded-xl border border-slate-200 space-y-1.5">
+                      <div className="bg-white p-3.5 rounded-2xl border border-slate-200 space-y-1.5">
                         <span className="text-xs font-semibold text-slate-500 flex items-center gap-1.5"><ShieldCheck className="size-3.5 text-primary" /> สิทธิ์แผนการเรียน:</span>
                         <p className="text-sm font-bold text-slate-800">{getActivePermissionsText(selectedStudent.permissions, ["ISM", "EP", "ภาคปกติ"])}</p>
                       </div>
                     </div>
                   </div>
 
-                  {/* 💡 ส่วนที่เพิ่มเข้ามา: กล่องแสดงประวัติการทำข้อสอบเพื่อกดลบ (รายครั้ง) */}
-                  <div className="bg-slate-50 p-6 rounded-2xl border border-slate-200/80 space-y-4 mt-6">
+                  {/* Exam History Details */}
+                  <div className="bg-slate-50 p-6 rounded-3xl border border-slate-200/80 space-y-4 mt-6">
                     <div className="flex items-center justify-between">
                       <h4 className="font-bold text-slate-800 flex items-center gap-2"><History className="size-4 text-slate-500"/> ประวัติการทำข้อสอบล่าสุด</h4>
-                      <span className="text-xs font-semibold bg-white border px-2 py-1 rounded-md text-slate-500">{selectedStudent.examHistory?.length || 0} รายการ</span>
+                      <span className="text-xs font-semibold bg-white border px-2.5 py-1 rounded-xl text-slate-500">{selectedStudent.examHistory?.length || 0} รายการ</span>
                     </div>
 
                     {selectedStudent.examHistory && selectedStudent.examHistory.length > 0 ? (
                       <div className="space-y-3 max-h-64 overflow-y-auto pr-2 custom-scrollbar">
                         {[...selectedStudent.examHistory].reverse().map((h: any) => (
-                           <div key={h.id} className="flex items-center justify-between bg-white p-4 rounded-xl border shadow-sm group">
+                           <div key={h.id} className="flex items-center justify-between bg-white p-4 rounded-2xl border shadow-sm group">
                              <div>
-                               <p className="font-semibold text-sm text-slate-800">{h.title}</p>
+                               <p className="font-bold text-sm text-slate-800">{h.title}</p>
                                <div className="flex items-center gap-3 mt-1.5">
                                  <p className="text-xs text-slate-500">{h.date}</p>
-                                 <p className="text-xs font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-100">
+                                 <p className="text-xs font-bold text-emerald-600 bg-emerald-50 px-2.5 py-0.5 rounded-lg border border-emerald-100">
                                    คะแนน: {h.score}/{h.total}
                                  </p>
                                </div>
                              </div>
                              <button 
                                onClick={() => handleDeleteStudentHistory(selectedStudent, h.id, h.exam_id)} 
-                               className="p-2 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors border border-transparent group-hover:border-red-100"
-                               title="ลบประวัติการทำสอบชุดนี้"
+                               className="p-2 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-xl transition-colors border border-transparent group-hover:border-red-100"
+                               title="ลบประวัติชุดนี้"
                              >
                                <Trash2 className="size-4"/>
                              </button>
@@ -1088,7 +1480,7 @@ function AdminDashboard() {
                         ))}
                       </div>
                     ) : (
-                      <div className="flex flex-col items-center justify-center py-6 text-slate-400 bg-white rounded-xl border border-dashed">
+                      <div className="flex flex-col items-center justify-center py-6 text-slate-400 bg-white rounded-2xl border border-dashed">
                         <History className="size-8 mb-2 opacity-20" />
                         <p className="text-sm font-medium">ยังไม่มีประวัติการทำข้อสอบ</p>
                       </div>
@@ -1096,18 +1488,82 @@ function AdminDashboard() {
                   </div>
                 </div>
               ) : (
-                <div className="lg:col-span-8 rounded-2xl border bg-slate-50 border-dashed border-slate-200 shadow-sm p-6 h-[400px] flex items-center justify-center text-slate-400 text-sm">
+                <div className="lg:col-span-8 rounded-3xl border bg-slate-50 border-dashed border-slate-200 shadow-sm p-6 h-[400px] flex items-center justify-center text-slate-400 text-sm">
                   คลิกที่รายชื่อนักเรียนเพื่อดูรายละเอียดและผลสอบ
                 </div>
               )}
             </div>
           </div>
         )}
+
+        {/* Tab 6: Access Codes Management */}
+        {activeTab === "codes" && (
+          <div className="animate-in fade-in slide-in-from-bottom-2 duration-300 space-y-6">
+            <div className="bg-white p-6 rounded-3xl border shadow-sm space-y-4">
+              <h3 className="font-bold text-lg text-slate-800 flex items-center gap-2">
+                <Key className="size-5 text-primary" /> สร้างรหัสปลดล็อกสิทธิ์ใหม่ (Access Code)
+              </h3>
+              
+              <div className="grid grid-cols-1 sm:grid-cols-12 gap-4">
+                <div className="sm:col-span-4">
+                  <label className="block text-xs font-bold text-slate-500 uppercase tracking-wide mb-1.5">ชื่อรหัสโค้ด</label>
+                  <input
+                    type="text"
+                    value={newCodeName}
+                    onChange={(e) => setNewCodeName(e.target.value)}
+                    placeholder="เช่น ISM2026, VIPPASS"
+                    className="w-full p-3 border rounded-2xl text-sm font-bold uppercase tracking-wider outline-none focus:ring-2 focus:ring-primary/20"
+                  />
+                </div>
+
+                <div className="sm:col-span-8 flex flex-col justify-end">
+                  <button
+                    onClick={handleCreateAccessCode}
+                    className="py-3 px-6 bg-primary text-white font-bold rounded-2xl shadow-sm hover:bg-primary/90 transition text-sm flex items-center justify-center gap-2"
+                  >
+                    <Plus className="size-4" /> สร้างรหัสโค้ด
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div className="rounded-3xl border bg-white shadow-sm overflow-hidden">
+              <div className="border-b bg-slate-50/70 p-4">
+                <h3 className="font-bold text-lg text-slate-800">รายการรหัสโค้ดที่มีในระบบ</h3>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-sm">
+                  <thead className="border-b text-slate-500 bg-white">
+                    <tr><th className="p-4 font-medium">รหัสโค้ด</th><th className="p-4 font-medium">สิทธิ์ที่ได้รับ</th><th className="p-4 font-medium">จัดการ</th></tr>
+                  </thead>
+                  <tbody className="divide-y">
+                    {accessCodes.length > 0 ? (
+                      accessCodes.map((c) => (
+                        <tr key={c.id} className="hover:bg-slate-50 transition-colors">
+                          <td className="p-4 font-mono font-black text-primary text-base">{c.code}</td>
+                          <td className="p-4 text-xs font-semibold text-slate-600">
+                            {getActivePermissionsText(c.permissions, ["ป.4", "ป.5", "ป.6", "ISM", "EP", "ภาคปกติ"])}
+                          </td>
+                          <td className="p-4">
+                            <button onClick={() => handleDeleteAccessCode(c.id)} className="p-2 text-slate-400 hover:text-red-500 border rounded-xl bg-white shadow-sm" title="ลบรหัสนี้"><Trash2 className="size-4"/></button>
+                          </td>
+                        </tr>
+                      ))
+                    ) : (
+                      <tr><td colSpan={3} className="p-12 text-center text-slate-400">ยังไม่มีรหัสโค้ดในระบบ</td></tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        )}
       </main>
 
+      {/* Modal: Add/Edit Lesson */}
       {showLessonModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm px-4">
-          <div className="w-full max-w-lg rounded-2xl bg-white p-7 shadow-2xl animate-in zoom-in-95 duration-200">
+          <div className="w-full max-w-lg rounded-3xl bg-white p-7 shadow-2xl animate-in zoom-in-95 duration-200">
             <div className="flex items-center justify-between mb-6 border-b pb-3">
               <h2 className="text-xl font-bold text-slate-800">{lessonFormData.id ? "แก้ไขบทเรียน" : "เพิ่มบทเรียนใหม่"}</h2>
               <button onClick={() => setShowLessonModal(false)} className="text-slate-400 hover:bg-slate-100 rounded-full p-1.5"><X className="size-5" /></button>
@@ -1115,10 +1571,10 @@ function AdminDashboard() {
             <form onSubmit={handleSaveLesson} className="space-y-4">
               <div>
                 <label className="block text-sm font-bold text-slate-700 mb-1">ชื่อบทเรียน</label>
-                <input type="text" required value={lessonFormData.title} onChange={e => setLessonFormData({ ...lessonFormData, title: e.target.value })} className="w-full p-2.5 border rounded-xl outline-none focus:ring-2 focus:ring-primary/50 text-sm" placeholder="เช่น บทที่ 1 เศษส่วนและทศนิยม" />
+                <input type="text" required value={lessonFormData.title} onChange={e => setLessonFormData({ ...lessonFormData, title: e.target.value })} className="w-full p-3 border rounded-2xl outline-none focus:ring-2 focus:ring-primary/50 text-sm" placeholder="เช่น บทที่ 1 เศษส่วนและทศนิยม" />
               </div>
               
-              <div className="space-y-4 bg-slate-50 p-4 rounded-xl border border-slate-100">
+              <div className="space-y-4 bg-slate-50 p-4 rounded-2xl border border-slate-100">
                 <div>
                   <label className="block text-xs font-bold text-slate-500 uppercase tracking-wide mb-2">ระดับชั้น (เลือกได้หลายชั้น)</label>
                   <div className="flex flex-wrap gap-2">
@@ -1130,7 +1586,7 @@ function AdminDashboard() {
                           ...prev, 
                           grade: prev.grade.includes(g) ? prev.grade.filter(x => x !== g) : [...prev.grade, g]
                         }))} 
-                        className={`px-3 py-1.5 border rounded-lg text-sm font-bold transition-all ${lessonFormData.grade.includes(g) ? 'bg-primary text-white border-primary shadow-sm' : 'bg-white text-slate-500 hover:bg-slate-100 border-slate-200'}`}
+                        className={`px-3.5 py-1.5 border rounded-xl text-xs font-bold transition-all ${lessonFormData.grade.includes(g) ? 'bg-primary text-white border-primary shadow-sm' : 'bg-white text-slate-500 hover:bg-slate-100 border-slate-200'}`}
                       >
                         {g}
                       </button>
@@ -1149,7 +1605,7 @@ function AdminDashboard() {
                           ...prev, 
                           program: prev.program.includes(p) ? prev.program.filter(x => x !== p) : [...prev.program, p]
                         }))} 
-                        className={`px-3 py-1.5 border rounded-lg text-sm font-bold transition-all ${lessonFormData.program.includes(p) ? 'bg-primary text-white border-primary shadow-sm' : 'bg-white text-slate-500 hover:bg-slate-100 border-slate-200'}`}
+                        className={`px-3.5 py-1.5 border rounded-xl text-xs font-bold transition-all ${lessonFormData.program.includes(p) ? 'bg-primary text-white border-primary shadow-sm' : 'bg-white text-slate-500 hover:bg-slate-100 border-slate-200'}`}
                       >
                         {p === "ภาคปกติ" ? "ภาคปกติ (Regular)" : `แผน ${p}`}
                       </button>
@@ -1160,34 +1616,35 @@ function AdminDashboard() {
 
               <div>
                 <label className="block text-sm font-bold text-slate-700 mb-1">วิชา</label>
-                <select value={lessonFormData.subject} onChange={e => setLessonFormData({ ...lessonFormData, subject: e.target.value })} className="w-full p-2.5 border rounded-xl outline-none focus:ring-2 focus:ring-primary/50 text-sm bg-white">
+                <select value={lessonFormData.subject} onChange={e => setLessonFormData({ ...lessonFormData, subject: e.target.value })} className="w-full p-3 border rounded-2xl outline-none focus:ring-2 focus:ring-primary/50 text-sm bg-white font-medium">
                   <option>คณิตศาสตร์</option><option>วิทยาศาสตร์</option><option>ภาษาอังกฤษ</option><option>ภาษาไทย</option><option>สังคมศึกษา</option>
                 </select>
               </div>
 
-              <div><label className="block text-sm font-bold text-slate-700 mb-1">ลิงก์วิดีโอการสอน (YouTube/Drive)</label><input type="url" value={lessonFormData.video_url} onChange={e => setLessonFormData({ ...lessonFormData, video_url: e.target.value })} className="w-full p-2.5 border rounded-xl outline-none focus:ring-2 focus:ring-primary/50 text-sm" placeholder="https://youtube.com/..." /></div>
-              <div><label className="block text-sm font-bold text-slate-700 mb-1">ลิงก์เอกสารประกอบการเรียน (PDF)</label><input type="url" value={lessonFormData.pdf_url} onChange={e => setLessonFormData({ ...lessonFormData, pdf_url: e.target.value })} className="w-full p-2.5 border rounded-xl outline-none focus:ring-2 focus:ring-primary/50 text-sm" placeholder="https://drive.google.com/..." /></div>
+              <div><label className="block text-sm font-bold text-slate-700 mb-1">ลิงก์วิดีโอการสอน (YouTube/Drive)</label><input type="url" value={lessonFormData.video_url} onChange={e => setLessonFormData({ ...lessonFormData, video_url: e.target.value })} className="w-full p-3 border rounded-2xl outline-none focus:ring-2 focus:ring-primary/50 text-sm" placeholder="https://youtube.com/..." /></div>
+              <div><label className="block text-sm font-bold text-slate-700 mb-1">ลิงก์เอกสารประกอบการเรียน (PDF)</label><input type="url" value={lessonFormData.pdf_url} onChange={e => setLessonFormData({ ...lessonFormData, pdf_url: e.target.value })} className="w-full p-3 border rounded-2xl outline-none focus:ring-2 focus:ring-primary/50 text-sm" placeholder="https://drive.google.com/..." /></div>
               
-              <div className="flex gap-3 pt-4"><button type="button" onClick={() => setShowLessonModal(false)} className="flex-1 py-3 border rounded-xl">ยกเลิก</button><button type="submit" className="flex-1 py-3 bg-primary text-white rounded-xl font-semibold hover:bg-primary/90">บันทึกบทเรียน</button></div>
+              <div className="flex gap-3 pt-4"><button type="button" onClick={() => setShowLessonModal(false)} className="flex-1 py-3.5 border rounded-2xl font-bold">ยกเลิก</button><button type="submit" className="flex-1 py-3.5 bg-primary text-white rounded-2xl font-bold hover:bg-primary/90">บันทึกบทเรียน</button></div>
             </form>
           </div>
         </div>
       )}
 
+      {/* Modal: Add Worksheet */}
       {showWorksheetModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm px-4">
-          <div className="w-full max-w-lg rounded-2xl bg-white p-7 shadow-2xl animate-in zoom-in-95 duration-200">
+          <div className="w-full max-w-lg rounded-3xl bg-white p-7 shadow-2xl animate-in zoom-in-95 duration-200">
             <div className="flex items-center justify-between mb-6 border-b pb-3">
-              <h2 className="text-xl font-bold text-slate-800">อัปโหลดชีทแบบฝึกหัด (กระดาษใส)</h2>
+              <h2 className="text-xl font-bold text-slate-800">เพิ่มแบบฝึกหัดใหม่</h2>
               <button onClick={() => setShowWorksheetModal(false)} className="text-slate-400 hover:bg-slate-100 rounded-full p-1.5"><X className="size-5" /></button>
             </div>
             <div className="space-y-4">
               <div>
                 <label className="block text-sm font-bold text-slate-700 mb-1">ชื่อชุดแบบฝึกหัด</label>
-                <input type="text" value={worksheetFormData.title} onChange={e => setWorksheetFormData({ ...worksheetFormData, title: e.target.value })} className="w-full p-2.5 border rounded-xl outline-none focus:ring-2 focus:ring-primary/50 text-sm" placeholder="เช่น แบบฝึกหัดคณิตศาสตร์ บทที่ 1" />
+                <input type="text" value={worksheetFormData.title} onChange={e => setWorksheetFormData({ ...worksheetFormData, title: e.target.value })} className="w-full p-3 border rounded-2xl outline-none focus:ring-2 focus:ring-primary/50 text-sm" placeholder="เช่น แบบฝึกหัดคณิตศาสตร์ บทที่ 1" />
               </div>
               
-              <div className="space-y-4 bg-slate-50 p-4 rounded-xl border border-slate-100">
+              <div className="space-y-4 bg-slate-50 p-4 rounded-2xl border border-slate-100">
                 <div>
                   <label className="block text-xs font-bold text-slate-500 uppercase tracking-wide mb-2">ระดับชั้น (เลือกได้หลายชั้น)</label>
                   <div className="flex flex-wrap gap-2">
@@ -1199,7 +1656,7 @@ function AdminDashboard() {
                           ...prev, 
                           grade: prev.grade.includes(g) ? prev.grade.filter(x => x !== g) : [...prev.grade, g]
                         }))} 
-                        className={`px-3 py-1.5 border rounded-lg text-sm font-bold transition-all ${worksheetFormData.grade.includes(g) ? 'bg-primary text-white border-primary shadow-sm' : 'bg-white text-slate-500 hover:bg-slate-100 border-slate-200'}`}
+                        className={`px-3.5 py-1.5 border rounded-xl text-xs font-bold transition-all ${worksheetFormData.grade.includes(g) ? 'bg-primary text-white border-primary shadow-sm' : 'bg-white text-slate-500 hover:bg-slate-100 border-slate-200'}`}
                       >
                         {g}
                       </button>
@@ -1218,7 +1675,7 @@ function AdminDashboard() {
                           ...prev, 
                           program: prev.program.includes(p) ? prev.program.filter(x => x !== p) : [...prev.program, p]
                         }))} 
-                        className={`px-3 py-1.5 border rounded-lg text-sm font-bold transition-all ${worksheetFormData.program.includes(p) ? 'bg-primary text-white border-primary shadow-sm' : 'bg-white text-slate-500 hover:bg-slate-100 border-slate-200'}`}
+                        className={`px-3.5 py-1.5 border rounded-xl text-xs font-bold transition-all ${worksheetFormData.program.includes(p) ? 'bg-primary text-white border-primary shadow-sm' : 'bg-white text-slate-500 hover:bg-slate-100 border-slate-200'}`}
                       >
                         {p === "ภาคปกติ" ? "ภาคปกติ (Regular)" : `แผน ${p}`}
                       </button>
@@ -1229,39 +1686,40 @@ function AdminDashboard() {
 
               <div>
                 <label className="block text-sm font-bold text-slate-700 mb-1">วิชา</label>
-                <select value={worksheetFormData.subject} onChange={e => setWorksheetFormData({ ...worksheetFormData, subject: e.target.value })} className="w-full p-2.5 border rounded-xl text-sm bg-white">
+                <select value={worksheetFormData.subject} onChange={e => setWorksheetFormData({ ...worksheetFormData, subject: e.target.value })} className="w-full p-3 border rounded-2xl text-sm bg-white font-medium">
                   <option>คณิตศาสตร์</option><option>วิทยาศาสตร์</option><option>ภาษาอังกฤษ</option><option>ภาษาไทย</option><option>สังคมศึกษา</option>
                 </select>
               </div>
 
-              <div className="bg-slate-50 p-4 rounded-xl border border-slate-100 relative">
-                <label className="block text-sm font-bold text-slate-700 mb-2">อัปโหลดรูปภาพชีท (เลือกได้หลายหน้าพร้อมกัน)</label>
-                <input type="file" accept="image/*" multiple onChange={handleUploadWorksheetImages} disabled={isUploading} className="w-full text-sm file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-primary/10 file:text-primary hover:file:bg-primary/20 disabled:opacity-50 cursor-pointer" />
+              <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100 relative">
+                <label className="block text-sm font-bold text-slate-700 mb-2">อัปโหลดรูปภาพแบบฝึกหัด (เลือกได้หลายหน้าพร้อมกัน)</label>
+                <input type="file" accept="image/*" multiple onChange={handleUploadWorksheetImages} disabled={isUploading} className="w-full text-sm file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-xs file:font-bold file:bg-primary/10 file:text-primary hover:file:bg-primary/20 disabled:opacity-50 cursor-pointer" />
                 
                 {isUploading && (
-                  <div className="absolute inset-0 bg-white/80 backdrop-blur-sm flex flex-col items-center justify-center rounded-xl">
+                  <div className="absolute inset-0 bg-white/80 backdrop-blur-sm flex flex-col items-center justify-center rounded-2xl">
                     <Loader2 className="size-6 animate-spin text-primary mb-2" />
                     <span className="text-xs font-bold text-primary">กำลังอัปโหลดรูปภาพ...</span>
                   </div>
                 )}
                 
                 {!isUploading && worksheetFormData.pages.length > 0 && (
-                  <p className="mt-3 text-sm font-medium text-emerald-600">อัปโหลดเข้า Storage สำเร็จแล้ว {worksheetFormData.pages.length} หน้า</p>
+                  <p className="mt-3 text-xs font-bold text-emerald-600">อัปโหลดเข้า Storage สำเร็จแล้ว {worksheetFormData.pages.length} หน้า</p>
                 )}
               </div>
 
               <div className="flex gap-3 pt-4">
-                <button type="button" onClick={() => setShowWorksheetModal(false)} className="flex-1 py-3 border rounded-xl">ยกเลิก</button>
-                <button onClick={handleSaveWorksheet} disabled={isUploading} className="flex-1 py-3 bg-primary text-white rounded-xl font-semibold hover:bg-primary/90 disabled:opacity-50">บันทึกเข้าสู่ระบบ</button>
+                <button type="button" onClick={() => setShowWorksheetModal(false)} className="flex-1 py-3.5 border rounded-2xl font-bold">ยกเลิก</button>
+                <button onClick={handleSaveWorksheet} disabled={isUploading} className="flex-1 py-3.5 bg-primary text-white rounded-2xl font-bold hover:bg-primary/90 disabled:opacity-50">บันทึกเข้าสู่ระบบ</button>
               </div>
             </div>
           </div>
         </div>
       )}
 
+      {/* Modal: Student Form */}
       {showStudentModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm px-4 py-8">
-          <div className="w-full max-w-2xl max-h-[90vh] overflow-y-auto custom-scrollbar rounded-2xl bg-white p-7 shadow-2xl animate-in zoom-in-95 duration-200">
+          <div className="w-full max-w-2xl max-h-[90vh] overflow-y-auto custom-scrollbar rounded-3xl bg-white p-7 shadow-2xl animate-in zoom-in-95 duration-200">
             <div className="flex items-center justify-between mb-6 sticky top-0 bg-white pb-3 z-10 border-b">
               <h2 className="text-xl font-bold text-slate-800">
                 {isEditing ? "แก้ไขข้อมูลและสิทธิ์นักเรียน" : "เพิ่มนักเรียนใหม่ (สร้างบัญชี)"}
@@ -1347,19 +1805,19 @@ function AdminDashboard() {
               </div>
 
               <div className="pt-2 flex gap-3">
-                <button type="button" onClick={() => setShowStudentModal(false)} className="flex-1 py-3 rounded-xl border font-medium text-slate-600 hover:bg-slate-50 transition-colors">ยกเลิก</button>
-                <button type="submit" className="flex-1 py-3 rounded-xl bg-primary text-white font-bold hover:bg-primary/90 transition-colors flex justify-center items-center gap-2 shadow-md"><Save className="size-4"/> บันทึกข้อมูลและสิทธิ์</button>
+                <button type="button" onClick={() => setShowStudentModal(false)} className="flex-1 py-3.5 rounded-2xl border font-bold text-slate-600 hover:bg-slate-50 transition-colors">ยกเลิก</button>
+                <button type="submit" className="flex-1 py-3.5 rounded-2xl bg-primary text-white font-bold hover:bg-primary/90 transition-colors flex justify-center items-center gap-2 shadow-md"><Save className="size-4"/> บันทึกข้อมูลและสิทธิ์</button>
               </div>
             </form>
           </div>
         </div>
       )}
 
+      {/* Modal: Exam Editor & AI Scan */}
       {examModalMode !== "none" && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm px-4 py-6">
-          
           {examModalMode === "exam_info" && (
-            <div className="w-full max-w-lg rounded-2xl bg-white p-8 shadow-2xl animate-in zoom-in-95 duration-200">
+            <div className="w-full max-w-lg rounded-3xl bg-white p-8 shadow-2xl animate-in zoom-in-95 duration-200">
               <div className="flex justify-between mb-6 border-b pb-3">
                 <h2 className="text-xl font-bold text-slate-800">{editingExamId ? "แก้ไขข้อมูลชุดข้อสอบ" : "1. ข้อมูลชุดข้อสอบ"}</h2>
                 <button onClick={() => setExamModalMode("none")} className="p-1"><X className="size-5" /></button>
@@ -1367,10 +1825,10 @@ function AdminDashboard() {
               <div className="space-y-5">
                 <div>
                   <label className="block text-sm font-bold text-slate-700 mb-1.5">ชื่อชุดข้อสอบ</label>
-                  <input type="text" value={newExamInfo.title} onChange={e => setNewExamInfo({...newExamInfo, title: e.target.value})} className="w-full p-3 border rounded-xl outline-none focus:ring-2 focus:ring-primary/50 text-sm" placeholder="เช่น ตะลุยโจทย์เรขาคณิตเข้า ม.1 (ชุดที่ 1)"/>
+                  <input type="text" value={newExamInfo.title} onChange={e => setNewExamInfo({...newExamInfo, title: e.target.value})} className="w-full p-3.5 border rounded-2xl outline-none focus:ring-2 focus:ring-primary/50 text-sm font-semibold" placeholder="เช่น ตะลุยโจทย์เรขาคณิตเข้า ม.1 (ชุดที่ 1)"/>
                 </div>
 
-                <div className="space-y-4 bg-slate-50 p-4 rounded-xl border border-slate-100">
+                <div className="space-y-4 bg-slate-50 p-4 rounded-2xl border border-slate-100">
                   <div>
                     <label className="block text-xs font-bold text-slate-500 uppercase tracking-wide mb-2">ระดับชั้น (เลือกได้หลายชั้น)</label>
                     <div className="flex flex-wrap gap-2">
@@ -1382,7 +1840,7 @@ function AdminDashboard() {
                             ...prev, 
                             grade: prev.grade.includes(g) ? prev.grade.filter(x => x !== g) : [...prev.grade, g]
                           }))} 
-                          className={`px-4 py-2 border rounded-xl text-sm font-bold transition-all ${newExamInfo.grade.includes(g) ? 'bg-primary text-white border-primary shadow-md' : 'bg-white text-slate-500 hover:bg-slate-100 border-slate-200'}`}
+                          className={`px-4 py-2 border rounded-xl text-xs font-bold transition-all ${newExamInfo.grade.includes(g) ? 'bg-primary text-white border-primary shadow-md' : 'bg-white text-slate-500 hover:bg-slate-100 border-slate-200'}`}
                         >
                           {g}
                         </button>
@@ -1401,7 +1859,7 @@ function AdminDashboard() {
                             ...prev, 
                             program: prev.program.includes(p) ? prev.program.filter(x => x !== p) : [...prev.program, p]
                           }))} 
-                          className={`px-4 py-2 border rounded-xl text-sm font-bold transition-all ${newExamInfo.program.includes(p) ? 'bg-primary text-white border-primary shadow-md' : 'bg-white text-slate-500 hover:bg-slate-100 border-slate-200'}`}
+                          className={`px-4 py-2 border rounded-xl text-xs font-bold transition-all ${newExamInfo.program.includes(p) ? 'bg-primary text-white border-primary shadow-md' : 'bg-white text-slate-500 hover:bg-slate-100 border-slate-200'}`}
                         >
                           {p === "ภาคปกติ" ? "ภาคปกติ (Regular)" : `แผน ${p}`}
                         </button>
@@ -1410,13 +1868,13 @@ function AdminDashboard() {
                   </div>
                 </div>
 
-                <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-3">
+                <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200 space-y-3">
                   <div className="flex items-center justify-between">
                     <label className="text-sm font-bold text-slate-700">ระบบจับเวลาสอบ</label>
                     <button
                       type="button"
                       onClick={() => setNewExamInfo(prev => ({ ...prev, is_timed: !prev.is_timed }))}
-                      className={`px-3 py-1 rounded-lg text-xs font-bold transition-all border ${
+                      className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all border ${
                         newExamInfo.is_timed ? "bg-primary text-white border-primary" : "bg-white text-slate-500 border-slate-300"
                       }`}
                     >
@@ -1426,32 +1884,44 @@ function AdminDashboard() {
 
                   {newExamInfo.is_timed && (
                     <div className="flex items-center gap-3">
-                      <label className="text-xs font-semibold text-slate-600">ระยะเวลาสอบ:</label>
+                      <label className="text-xs font-bold text-slate-600">ระยะเวลาสอบ:</label>
                       <input
                         type="number"
                         min="1"
                         value={newExamInfo.duration_minutes}
                         onChange={e => setNewExamInfo(prev => ({ ...prev, duration_minutes: Number(e.target.value) || 60 }))}
-                        className="w-24 p-2 border rounded-lg text-sm bg-white text-center font-bold"
+                        className="w-24 p-2.5 border rounded-xl text-sm bg-white text-center font-bold"
                       />
                       <span className="text-xs font-bold text-slate-500">นาที</span>
                     </div>
                   )}
+
+                  <div className="flex items-center justify-between pt-2 border-t border-slate-200">
+                    <label className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
+                      <Shuffle className="size-3.5 text-primary" /> สลับข้อสอบและตัวเลือกอัตโนมัติ
+                    </label>
+                    <input
+                      type="checkbox"
+                      checked={newExamInfo.shuffle_questions}
+                      onChange={e => setNewExamInfo(prev => ({ ...prev, shuffle_questions: e.target.checked }))}
+                      className="size-4 text-primary rounded"
+                    />
+                  </div>
                 </div>
 
                 <div className="grid grid-cols-2 gap-4 pt-1">
                   <div>
                     <label className="block text-sm font-bold text-slate-700 mb-1.5">รายวิชา</label>
-                    <select value={newExamInfo.subject} onChange={e => setNewExamInfo({...newExamInfo, subject: e.target.value})} className="w-full p-3 border rounded-xl outline-none focus:ring-2 focus:ring-primary/50 text-sm bg-white">
+                    <select value={newExamInfo.subject} onChange={e => setNewExamInfo({...newExamInfo, subject: e.target.value})} className="w-full p-3.5 border rounded-2xl outline-none focus:ring-2 focus:ring-primary/50 text-sm bg-white font-medium">
                       <option>คณิตศาสตร์</option><option>วิทยาศาสตร์</option><option>ภาษาอังกฤษ</option><option>ภาษาไทย</option><option>สังคมศึกษา</option>
                     </select>
                   </div>
                   <div>
                     <label className="block text-sm font-bold text-slate-700 mb-1.5">ปีการศึกษา</label>
-                    <input type="text" value={newExamInfo.year} onChange={e => setNewExamInfo({...newExamInfo, year: e.target.value})} className="w-full p-3 border rounded-xl outline-none focus:ring-2 focus:ring-primary/50 text-sm" />
+                    <input type="text" value={newExamInfo.year} onChange={e => setNewExamInfo({...newExamInfo, year: e.target.value})} className="w-full p-3.5 border rounded-2xl outline-none focus:ring-2 focus:ring-primary/50 text-sm font-bold" />
                   </div>
                 </div>
-                <button onClick={() => setExamModalMode("select")} className="w-full py-4 bg-primary text-white rounded-xl font-bold mt-2 shadow-md hover:bg-primary/90 transition-transform active:scale-[0.98]">
+                <button onClick={() => setExamModalMode("select")} className="w-full py-4 bg-primary text-white rounded-2xl font-bold mt-2 shadow-md hover:bg-primary/90 transition-transform active:scale-[0.98]">
                   ถัดไป: จัดการข้อคำถาม
                 </button>
               </div>
@@ -1459,25 +1929,25 @@ function AdminDashboard() {
           )}
 
           {examModalMode === "select" && (
-            <div className="w-full max-w-xl rounded-2xl bg-white p-8 shadow-2xl animate-in fade-in slide-in-from-right-4">
-              <div className="flex gap-3 mb-6 border-b pb-4"><button onClick={() => setExamModalMode("exam_info")} className="p-2"><ChevronLeft/></button><div><h2 className="text-xl font-bold text-slate-800">2. นำเข้าข้อคำถาม</h2><p className="text-sm text-slate-500">{newExamInfo.title}</p></div></div>
+            <div className="w-full max-w-xl rounded-3xl bg-white p-8 shadow-2xl animate-in fade-in slide-in-from-right-4">
+              <div className="flex gap-3 mb-6 border-b pb-4"><button onClick={() => setExamModalMode("exam_info")} className="p-2"><ChevronLeft/></button><div><h2 className="text-xl font-bold text-slate-800">2. นำเข้าข้อคำถาม</h2><p className="text-xs text-slate-500">{newExamInfo.title}</p></div></div>
               <div className="grid gap-5 sm:grid-cols-2">
-                <button onClick={() => setExamModalMode("ai")} className="flex flex-col items-center gap-4 rounded-2xl border-2 border-primary/30 bg-primary/5 p-8 hover:bg-primary/10 transition"><Sparkles className="size-9 text-primary" /><p className="font-bold text-primary text-base">สแกนภาพข้อสอบ (AI OCR + เฉลยวิธีทำ)</p></button>
-                <button onClick={() => setExamModalMode("manual")} className="flex flex-col items-center gap-4 rounded-2xl border-2 border-slate-200 p-8 hover:bg-slate-50 transition"><FileText className="size-9 text-slate-500" /><p className="font-bold text-slate-700 text-base">พิมพ์ข้อสอบเอง (ปรนัย/อัตนัย/เฉลย)</p></button>
+                <button onClick={() => setExamModalMode("ai")} className="flex flex-col items-center gap-4 rounded-3xl border-2 border-primary/30 bg-primary/5 p-8 hover:bg-primary/10 transition"><Sparkles className="size-10 text-primary" /><p className="font-bold text-primary text-sm text-center">สแกนภาพข้อสอบ (AI OCR + เฉลยวิธีทำ)</p></button>
+                <button onClick={() => setExamModalMode("manual")} className="flex flex-col items-center gap-4 rounded-3xl border-2 border-slate-200 p-8 hover:bg-slate-50 transition"><FileText className="size-10 text-slate-500" /><p className="font-bold text-slate-700 text-sm text-center">พิมพ์ข้อสอบเอง (ปรนัย/อัตนัย/เฉลย)</p></button>
               </div>
             </div>
           )}
 
           {examModalMode === "manual" && (
-            <div className="w-full max-w-4xl max-h-[90vh] flex flex-col rounded-2xl bg-white p-7 shadow-2xl animate-in fade-in">
+            <div className="w-full max-w-4xl max-h-[90vh] flex flex-col rounded-3xl bg-white p-7 shadow-2xl animate-in fade-in">
               <div className="flex flex-col border-b pb-4 mb-4 gap-3">
                 <div className="flex items-start justify-between">
                   <div className="flex items-start gap-3">
-                    {!editingExamId && <button onClick={() => setExamModalMode("select")} className="p-1.5 hover:bg-slate-100 rounded-lg mt-1"><ChevronLeft/></button>}
+                    {!editingExamId && <button onClick={() => setExamModalMode("select")} className="p-1.5 hover:bg-slate-100 rounded-xl mt-1"><ChevronLeft/></button>}
                     <div>
-                      <h2 className="text-xl font-bold text-slate-800 mb-2">{editingExamId ? `แก้ไขชุดข้อสอบ: ${newExamInfo.title}` : "สร้างข้อสอบแบบ Manual"} ({manualQuestions.length} ข้อ)</h2>
+                      <h2 className="text-xl font-black text-slate-800 mb-2">{editingExamId ? `แก้ไขชุดข้อสอบ: ${newExamInfo.title}` : "สร้างข้อสอบแบบ Manual"} ({manualQuestions.length} ข้อ)</h2>
                       
-                      <div className="flex flex-col sm:flex-row gap-3 sm:gap-6 bg-slate-50 p-2.5 rounded-xl border border-slate-200/60 w-fit">
+                      <div className="flex flex-col sm:flex-row gap-3 sm:gap-6 bg-slate-50 p-2.5 rounded-2xl border border-slate-200/60 w-fit">
                         <div className="flex items-center gap-2">
                           <span className="text-xs font-bold text-slate-500 uppercase tracking-wide">ชั้นปี:</span>
                           <div className="flex gap-1.5">
@@ -1485,7 +1955,7 @@ function AdminDashboard() {
                               <button 
                                 key={g} type="button" 
                                 onClick={() => setNewExamInfo(prev => ({ ...prev, grade: prev.grade.includes(g) ? prev.grade.filter(x => x !== g) : [...prev.grade, g] }))} 
-                                className={`px-2.5 py-1 rounded-lg text-xs font-bold border transition-colors ${newExamInfo.grade.includes(g) ? 'bg-primary text-white border-primary shadow-sm' : 'bg-white text-slate-500 border-slate-200 hover:bg-slate-100'}`}
+                                className={`px-2.5 py-1 rounded-xl text-xs font-bold border transition-colors ${newExamInfo.grade.includes(g) ? 'bg-primary text-white border-primary shadow-sm' : 'bg-white text-slate-500 border-slate-200 hover:bg-slate-100'}`}
                               >{g}</button>
                             ))}
                           </div>
@@ -1497,7 +1967,7 @@ function AdminDashboard() {
                               <button 
                                 key={p} type="button" 
                                 onClick={() => setNewExamInfo(prev => ({ ...prev, program: prev.program.includes(p) ? prev.program.filter(x => x !== p) : [...prev.program, p] }))} 
-                                className={`px-2.5 py-1 rounded-lg text-xs font-bold border transition-colors ${newExamInfo.program.includes(p) ? 'bg-primary text-white border-primary shadow-sm' : 'bg-white text-slate-500 border-slate-200 hover:bg-slate-100'}`}
+                                className={`px-2.5 py-1 rounded-xl text-xs font-bold border transition-colors ${newExamInfo.program.includes(p) ? 'bg-primary text-white border-primary shadow-sm' : 'bg-white text-slate-500 border-slate-200 hover:bg-slate-100'}`}
                               >{p === "ภาคปกติ" ? "ภาคปกติ" : p}</button>
                             ))}
                           </div>
@@ -1505,36 +1975,36 @@ function AdminDashboard() {
                       </div>
                     </div>
                   </div>
-                  <button onClick={() => { setExamModalMode("none"); setEditingExamId(null); }} className="p-1.5 hover:bg-slate-100 rounded-full shrink-0"><X className="size-5" /></button>
+                  <button onClick={() => { setExamModalMode("none"); setEditingExamId(null); }} className="p-2 hover:bg-slate-100 rounded-full shrink-0"><X className="size-5" /></button>
                 </div>
               </div>
 
               <div className="flex-1 overflow-y-auto space-y-6 pr-2 custom-scrollbar">
                 {manualQuestions.map((q, qIdx) => (
-                  <div key={q.id || qIdx} className={`border-2 rounded-2xl p-5 bg-white shadow-sm relative space-y-4 transition-all ${q.image_url === "NEEDS_IMAGE" ? "border-red-400 bg-red-50/30" : "border-slate-200"}`}>
+                  <div key={q.id || qIdx} className={`border-2 rounded-3xl p-5 bg-white shadow-sm relative space-y-4 transition-all ${q.image_url === "NEEDS_IMAGE" ? "border-red-400 bg-red-50/30" : "border-slate-200"}`}>
                     
                     {q.image_url === "NEEDS_IMAGE" && (
-                      <div className="flex items-center gap-2 text-red-600 bg-red-100 px-3 py-2 rounded-lg text-xs font-bold mb-2">
-                        <AlertTriangle className="size-4" /> 
+                      <div className="flex items-center gap-2 text-red-600 bg-red-100 px-3.5 py-2 rounded-xl text-xs font-bold mb-2">
+                        <AlertTriangle className="size-4 shrink-0" /> 
                         AI แจ้งว่าข้อนี้มีรูปภาพประกอบ (เช่น รูปเรขาคณิต) กรุณาแคปรูปแล้วอัปโหลดในช่องด้านล่าง!
                       </div>
                     )}
 
                     <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b pb-3">
                       <div className="flex items-center gap-2">
-                        <span className="font-bold text-primary text-base">ข้อที่ {qIdx + 1}</span>
-                        <div className="inline-flex rounded-xl bg-slate-100 p-1 border">
+                        <span className="font-black text-primary text-base">ข้อที่ {qIdx + 1}</span>
+                        <div className="inline-flex rounded-2xl bg-slate-100 p-1 border">
                           <button
                             type="button"
                             onClick={() => toggleQuestionType(qIdx, "choice")}
-                            className={`flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-semibold transition-all ${q.type === "choice" ? "bg-white text-primary shadow-sm" : "text-slate-500 hover:text-slate-800"}`}
+                            className={`flex items-center gap-1.5 px-3 py-1 rounded-xl text-xs font-bold transition-all ${q.type === "choice" ? "bg-white text-primary shadow-sm" : "text-slate-500 hover:text-slate-800"}`}
                           >
                             <CheckSquare className="size-3.5" /> ปรนัย (ช้อยส์)
                           </button>
                           <button
                             type="button"
                             onClick={() => toggleQuestionType(qIdx, "subjective")}
-                            className={`flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-semibold transition-all ${q.type === "subjective" ? "bg-white text-primary shadow-sm" : "text-slate-500 hover:text-slate-800"}`}
+                            className={`flex items-center gap-1.5 px-3 py-1 rounded-xl text-xs font-bold transition-all ${q.type === "subjective" ? "bg-white text-primary shadow-sm" : "text-slate-500 hover:text-slate-800"}`}
                           >
                             <AlignLeft className="size-3.5" /> อัตนัย (เขียนตอบ)
                           </button>
@@ -1544,27 +2014,27 @@ function AdminDashboard() {
                     </div>
 
                     <div className="space-y-1.5">
-                      <label className="text-xs font-semibold text-slate-600">โจทย์คำถาม</label>
+                      <label className="text-xs font-bold text-slate-600">โจทย์คำถาม</label>
                       <textarea 
                         rows={2}
                         value={q.question}
                         onChange={(e) => updateQuestionText(qIdx, e.target.value)}
                         placeholder="พิมพ์ข้อความโจทย์คำถามที่นี่..."
-                        className="w-full p-3 border rounded-xl text-sm focus:ring-1 focus:ring-primary outline-none"
+                        className="w-full p-3.5 border rounded-2xl text-sm focus:ring-2 focus:ring-primary/20 outline-none font-medium"
                       />
                     </div>
 
-                    <div className={`p-4 rounded-xl border relative ${q.image_url === "NEEDS_IMAGE" ? "bg-red-50 border-red-200 border-dashed" : "bg-slate-50 border-slate-200"}`}>
-                      <label className={`text-xs font-semibold flex items-center gap-1.5 mb-2 ${q.image_url === "NEEDS_IMAGE" ? "text-red-600" : "text-slate-600"}`}>
+                    <div className={`p-4 rounded-2xl border relative ${q.image_url === "NEEDS_IMAGE" ? "bg-red-50 border-red-200 border-dashed" : "bg-slate-50 border-slate-200"}`}>
+                      <label className={`text-xs font-bold flex items-center gap-1.5 mb-2 ${q.image_url === "NEEDS_IMAGE" ? "text-red-600" : "text-slate-600"}`}>
                         <ImageIcon className={`size-4 ${q.image_url === "NEEDS_IMAGE" ? "text-red-500" : "text-primary"}`} /> รูปภาพประกอบโจทย์
                       </label>
                       {q.image_url && q.image_url !== "NEEDS_IMAGE" ? (
-                        <div className="relative inline-block border rounded-xl overflow-hidden bg-white">
+                        <div className="relative inline-block border rounded-2xl overflow-hidden bg-white shadow-sm">
                           <img src={q.image_url} alt="Question Attachment" className="max-h-48 object-contain" />
                           <button onClick={() => removeQuestionImage(qIdx)} className="absolute top-2 right-2 bg-red-500 text-white p-1 rounded-full hover:bg-red-600 shadow"><X className="size-3.5" /></button>
                         </div>
                       ) : (
-                        <label className={`flex items-center gap-2 px-4 py-2 bg-white border border-dashed rounded-xl hover:bg-slate-100 text-xs w-fit ${isUploading ? "cursor-wait opacity-50" : "cursor-pointer"} ${q.image_url === "NEEDS_IMAGE" ? "border-red-400 text-red-600 shadow-sm shadow-red-100" : "border-slate-300 text-slate-600"}`}>
+                        <label className={`flex items-center gap-2 px-4 py-2.5 bg-white border border-dashed rounded-2xl hover:bg-slate-100 text-xs w-fit ${isUploading ? "cursor-wait opacity-50" : "cursor-pointer"} ${q.image_url === "NEEDS_IMAGE" ? "border-red-400 text-red-600 shadow-sm shadow-red-100" : "border-slate-300 text-slate-600"}`}>
                           {isUploading ? <Loader2 className="size-4 animate-spin text-primary" /> : <UploadCloud className={`size-4 ${q.image_url === "NEEDS_IMAGE" ? "text-red-500" : "text-primary"}`} />} 
                           {isUploading ? "กำลังอัปโหลด..." : q.image_url === "NEEDS_IMAGE" ? "คลิกอัปโหลดรูปภาพด่วน!" : "อัปโหลดรูปภาพโจทย์"}
                           <input type="file" accept="image/*" className="hidden" disabled={isUploading} onChange={(e) => updateQuestionImage(qIdx, e)} />
@@ -1575,7 +2045,7 @@ function AdminDashboard() {
                     {q.type === "choice" && (
                       <div className="space-y-3 pt-2">
                         <div className="flex justify-between items-center">
-                          <label className="text-xs font-semibold text-slate-600">ตัวเลือกช้อยส์ ({q.options.length}/5) - ติ๊กวงกลมเพื่อเลือกข้อที่ถูกต้อง</label>
+                          <label className="text-xs font-bold text-slate-600">ตัวเลือกช้อยส์ ({q.options.length}/5) - ติ๊กวงกลมเพื่อเลือกข้อที่ถูกต้อง</label>
                           {q.options.length < 5 && (
                             <button type="button" onClick={() => addOptionToQuestion(qIdx)} className="text-xs text-primary font-bold hover:underline flex items-center gap-1">
                               <Plus className="size-3.5" /> เพิ่มช้อยส์
@@ -1588,7 +2058,7 @@ function AdminDashboard() {
                               <button 
                                 type="button" 
                                 onClick={() => setCorrectOption(qIdx, optIdx)} 
-                                className={`p-2 rounded-full border transition-all ${q.correct_index === optIdx ? "bg-green-500 text-white border-green-500 shadow-sm" : "bg-white text-slate-300 border-slate-300 hover:border-slate-400"}`}
+                                className={`p-2 rounded-xl border transition-all ${q.correct_index === optIdx ? "bg-emerald-500 text-white border-emerald-500 shadow-sm" : "bg-white text-slate-300 border-slate-300 hover:border-slate-400"}`}
                               >
                                 <CheckCircle2 className="size-4" />
                               </button>
@@ -1597,7 +2067,7 @@ function AdminDashboard() {
                                 type="text" 
                                 value={opt}
                                 onChange={(e) => updateOptionText(qIdx, optIdx, e.target.value)}
-                                className="flex-1 p-2.5 border rounded-xl text-sm outline-none focus:border-primary"
+                                className="flex-1 p-3 border rounded-2xl text-sm outline-none focus:border-primary font-medium"
                               />
                               {q.options.length > 2 && (
                                 <button type="button" onClick={() => removeOptionFromQuestion(qIdx, optIdx)} className="text-slate-400 hover:text-red-500 p-1.5"><Trash2 className="size-4"/></button>
@@ -1609,7 +2079,7 @@ function AdminDashboard() {
                     )}
 
                     {q.type === "subjective" && (
-                      <div className="space-y-3 pt-2 bg-amber-50/50 p-4 rounded-xl border border-amber-200/60">
+                      <div className="space-y-3 pt-2 bg-amber-50/50 p-4 rounded-2xl border border-amber-200/60">
                         <div className="flex justify-between items-center">
                           <div>
                             <label className="text-xs font-bold text-amber-900 flex items-center gap-1.5">
@@ -1619,7 +2089,7 @@ function AdminDashboard() {
                           <button 
                             type="button" 
                             onClick={() => addSubjectiveAnswerLine(qIdx)} 
-                            className="text-xs bg-amber-600 hover:bg-amber-700 text-white font-bold px-3 py-1.5 rounded-lg flex items-center gap-1 shadow-sm transition"
+                            className="text-xs bg-amber-600 hover:bg-amber-700 text-white font-bold px-3 py-1.5 rounded-xl flex items-center gap-1 shadow-sm transition"
                           >
                             <Plus className="size-3.5" /> เพิ่มช่องบรรทัด
                           </button>
@@ -1633,7 +2103,7 @@ function AdminDashboard() {
                                 type="text" 
                                 value={ans}
                                 onChange={(e) => updateSubjectiveAnswerText(qIdx, lineIdx, e.target.value)}
-                                className="flex-1 p-2.5 border border-amber-300 rounded-xl text-sm bg-white outline-none focus:ring-1 focus:ring-amber-500"
+                                className="flex-1 p-3 border border-amber-300 rounded-2xl text-sm bg-white outline-none focus:ring-1 focus:ring-amber-500 font-medium"
                               />
                               {(q.subjective_answers || []).length > 1 && (
                                 <button 
@@ -1650,7 +2120,7 @@ function AdminDashboard() {
                       </div>
                     )}
 
-                    <div className="bg-emerald-50/60 p-4 rounded-xl border border-emerald-200 space-y-1.5">
+                    <div className="bg-emerald-50/60 p-4 rounded-2xl border border-emerald-200 space-y-1.5">
                       <div className="flex items-center justify-between mb-2">
                         <label className="text-xs font-bold text-emerald-900 flex items-center gap-1.5">
                           <Lightbulb className="size-4 text-emerald-600" /> คำอธิบายเฉลยและวิธีทำอย่างละเอียด
@@ -1660,7 +2130,7 @@ function AdminDashboard() {
                           type="button"
                           onClick={() => handleGenerateExplanation(qIdx)}
                           disabled={generatingExpId === qIdx}
-                          className="text-[10px] sm:text-xs flex items-center gap-1 bg-emerald-100 hover:bg-emerald-200 text-emerald-700 px-2.5 py-1.5 rounded-lg font-bold transition-colors disabled:opacity-50 shadow-sm border border-emerald-200"
+                          className="text-[10px] sm:text-xs flex items-center gap-1 bg-emerald-100 hover:bg-emerald-200 text-emerald-700 px-3 py-1.5 rounded-xl font-bold transition-colors disabled:opacity-50 shadow-sm border border-emerald-200"
                         >
                           {generatingExpId === qIdx ? <Loader2 className="size-3 animate-spin"/> : <Sparkles className="size-3"/>}
                           ให้ AI ช่วยเขียนเฉลย
@@ -1671,21 +2141,21 @@ function AdminDashboard() {
                         rows={3}
                         value={q.explanation || ""}
                         onChange={(e) => updateQuestionExplanation(qIdx, e.target.value)}
-                        className="w-full p-2.5 border border-emerald-300 rounded-xl text-sm bg-white outline-none focus:ring-1 focus:ring-emerald-500"
+                        className="w-full p-3 border border-emerald-300 rounded-2xl text-sm bg-white outline-none focus:ring-1 focus:ring-emerald-500"
                       />
                     </div>
 
                   </div>
                 ))}
 
-                <button onClick={addManualQuestion} className="w-full py-3.5 border-2 border-dashed border-primary/40 bg-primary/5 rounded-2xl text-primary font-bold hover:bg-primary/10 transition flex items-center justify-center gap-2">
+                <button onClick={addManualQuestion} className="w-full py-4 border-2 border-dashed border-primary/40 bg-primary/5 rounded-3xl text-primary font-bold hover:bg-primary/10 transition flex items-center justify-center gap-2">
                   <PlusCircle className="size-5" /> เพิ่มข้อคำถามถัดไป
                 </button>
               </div>
 
               <div className="pt-4 border-t mt-4 flex gap-3">
-                <button onClick={() => { setExamModalMode("none"); setEditingExamId(null); }} className="flex-1 py-3 border rounded-xl font-medium">ยกเลิก</button>
-                <button onClick={() => handleSaveExamToDB(manualQuestions)} disabled={isUploading} className="flex-1 py-3 bg-primary text-white font-bold rounded-xl hover:bg-primary/90 shadow disabled:opacity-50">
+                <button onClick={() => { setExamModalMode("none"); setEditingExamId(null); }} className="flex-1 py-3.5 border rounded-2xl font-bold">ยกเลิก</button>
+                <button onClick={() => handleSaveExamToDB(manualQuestions)} disabled={isUploading} className="flex-1 py-3.5 bg-primary text-white font-bold rounded-2xl hover:bg-primary/90 shadow disabled:opacity-50">
                   {editingExamId ? "บันทึกการแก้ไขข้อสอบ" : "บันทึกข้อสอบเข้าระบบ"}
                 </button>
               </div>
@@ -1693,22 +2163,22 @@ function AdminDashboard() {
           )}
 
           {examModalMode === "ai" && (
-            <div className="w-full max-w-2xl rounded-2xl bg-white p-8 shadow-2xl animate-in fade-in slide-in-from-right-4">
+            <div className="w-full max-w-2xl rounded-3xl bg-white p-8 shadow-2xl animate-in fade-in slide-in-from-right-4">
               <div className="flex gap-3 mb-6"><button onClick={() => setExamModalMode("select")} className="p-2"><ChevronLeft/></button><h2 className="text-xl font-bold flex items-center gap-2"><Sparkles className="size-5 text-primary"/> เลือกรูปภาพข้อสอบที่ต้องการสแกน</h2></div>
               {previewImages.length === 0 ? (
-                <label className="flex flex-col items-center justify-center h-64 border-2 border-dashed rounded-2xl cursor-pointer hover:bg-slate-50"><ImageIcon className="size-12 text-slate-400 mb-3"/><p className="text-sm font-medium text-slate-600">คลิกหรือลากไฟล์ภาพข้อสอบมาวางที่นี่ (เลือกได้หลายหน้า)</p><input type="file" accept="image/*" multiple className="hidden" onChange={handleImageUpload} /></label>
+                <label className="flex flex-col items-center justify-center h-64 border-2 border-dashed rounded-3xl cursor-pointer hover:bg-slate-50"><ImageIcon className="size-12 text-slate-400 mb-3"/><p className="text-sm font-medium text-slate-600">คลิกหรือลากไฟล์ภาพข้อสอบมาวางที่นี่ (เลือกได้หลายหน้า)</p><input type="file" accept="image/*" multiple className="hidden" onChange={handleImageUpload} /></label>
               ) : (
                 <div className="space-y-6">
-                  <div className="bg-slate-50 p-4 rounded-xl border">
+                  <div className="bg-slate-50 p-4 rounded-2xl border">
                     <p className="text-sm font-medium mb-3">รูปภาพที่เตรียมประมวลผล ({previewImages.length} หน้า)</p>
                     <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 max-h-64 overflow-y-auto">
                       {previewImages.map((img, idx) => (
-                        <div key={idx} className="relative group border rounded-xl overflow-hidden bg-white"><img src={img} className="w-full h-32 object-cover" /><div className="absolute top-1 left-1 bg-black/60 text-white text-xs px-2 py-0.5 rounded">{idx+1}</div><button onClick={() => removeImage(idx)} className="absolute top-1 right-1 bg-white p-1 rounded-full text-red-500 shadow"><Trash2 className="size-4"/></button></div>
+                        <div key={idx} className="relative group border rounded-2xl overflow-hidden bg-white"><img src={img} className="w-full h-32 object-cover" /><div className="absolute top-1 left-1 bg-black/60 text-white text-xs px-2 py-0.5 rounded">{idx+1}</div><button onClick={() => removeImage(idx)} className="absolute top-1 right-1 bg-white p-1 rounded-full text-red-500 shadow"><Trash2 className="size-4"/></button></div>
                       ))}
-                      <label className="flex flex-col items-center justify-center border-2 border-dashed rounded-lg cursor-pointer hover:bg-slate-100 h-32"><PlusCircle className="size-6 text-slate-400 mb-1"/><span className="text-xs text-slate-500">เพิ่มหน้า</span><input type="file" accept="image/*" multiple className="hidden" onChange={handleImageUpload} /></label>
+                      <label className="flex flex-col items-center justify-center border-2 border-dashed rounded-2xl cursor-pointer hover:bg-slate-100 h-32"><PlusCircle className="size-6 text-slate-400 mb-1"/><span className="text-xs text-slate-500">เพิ่มหน้า</span><input type="file" accept="image/*" multiple className="hidden" onChange={handleImageUpload} /></label>
                     </div>
                   </div>
-                  <button onClick={processImageWithAI} disabled={isAiProcessing} className="w-full py-3.5 bg-gradient-to-r from-primary to-blue-600 text-white font-bold rounded-xl shadow-md disabled:opacity-50">
+                  <button onClick={processImageWithAI} disabled={isAiProcessing} className="w-full py-4 bg-gradient-to-r from-primary to-blue-600 text-white font-bold rounded-2xl shadow-md disabled:opacity-50">
                     {isAiProcessing ? "AI กำลังแกะข้อสอบและเขียนเฉลยวิธีทำอย่างละเอียด..." : "ให้ AI สแกนแปลงเป็นข้อสอบ + เจนเฉลยวิธีทำ"}
                   </button>
                 </div>
@@ -1717,7 +2187,7 @@ function AdminDashboard() {
           )}
 
           {examModalMode === "ai_result" && (
-            <div className="w-full max-w-3xl max-h-[90vh] flex flex-col rounded-2xl bg-white p-7 shadow-2xl animate-in zoom-in-95">
+            <div className="w-full max-w-3xl max-h-[90vh] flex flex-col rounded-3xl bg-white p-7 shadow-2xl animate-in zoom-in-95">
               <div className="flex justify-between mb-4 border-b pb-3">
                 <div className="flex items-center gap-2"><Sparkles className="size-5 text-green-500"/><h2 className="text-xl font-bold text-slate-800">ผลลัพธ์จาก AI ({aiResult?.length || 0} ข้อ)</h2></div>
                 <button onClick={() => { setExamModalMode("none"); setPreviewImages([]); }}><X className="size-5"/></button>
@@ -1725,9 +2195,9 @@ function AdminDashboard() {
 
               <div className="flex-1 overflow-y-auto space-y-4 pr-2 custom-scrollbar">
                 {aiResult && aiResult.map((q, idx) => (
-                  <div key={idx} className={`border rounded-xl p-4 space-y-2.5 ${q.image_url === "NEEDS_IMAGE" ? "bg-red-50/50 border-red-200" : "bg-slate-50/50 border-slate-200"}`}>
+                  <div key={idx} className={`border rounded-2xl p-4 space-y-2.5 ${q.image_url === "NEEDS_IMAGE" ? "bg-red-50/50 border-red-200" : "bg-slate-50/50 border-slate-200"}`}>
                     {q.image_url === "NEEDS_IMAGE" && (
-                      <div className="flex items-center gap-2 text-red-600 bg-red-100 px-3 py-1.5 rounded-lg text-[11px] font-bold mb-1 w-fit">
+                      <div className="flex items-center gap-2 text-red-600 bg-red-100 px-3 py-1.5 rounded-xl text-[11px] font-bold mb-1 w-fit">
                         <AlertTriangle className="size-3.5" /> ข้อนี้ต้องอัปโหลดรูปภาพ! (เพิ่มรูปในโหมดแก้ไข)
                       </div>
                     )}
@@ -1742,13 +2212,13 @@ function AdminDashboard() {
                     {q.type === "choice" ? (
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pl-4 mt-2">
                         {q.options.map((opt, optIdx) => (
-                          <div key={optIdx} className={`text-xs p-2 rounded-lg border ${q.correct_index === optIdx ? "bg-green-100 text-green-800 border-green-300 font-bold" : "bg-white text-slate-700"}`}>
+                          <div key={optIdx} className={`text-xs p-2 rounded-xl border ${q.correct_index === optIdx ? "bg-green-100 text-green-800 border-green-300 font-bold" : "bg-white text-slate-700"}`}>
                             {choiceLabels[optIdx]} {opt} {q.correct_index === optIdx && "✓ (เฉลย)"}
                           </div>
                         ))}
                       </div>
                     ) : (
-                      <div className="space-y-1.5 pl-4 mt-2 bg-amber-50/70 p-3 rounded-lg border border-amber-100">
+                      <div className="space-y-1.5 pl-4 mt-2 bg-amber-50/70 p-3 rounded-xl border border-amber-100">
                         <p className="text-[11px] font-bold text-amber-900">ช่องคำตอบอัตนัย:</p>
                         {(q.subjective_answers || [""]).map((ans, aIdx) => (
                           <div key={aIdx} className="text-xs bg-white p-2 rounded border text-amber-950 font-mono">ช่องที่ {aIdx + 1}: {ans || "(ว่าง)"}</div>
@@ -1757,7 +2227,7 @@ function AdminDashboard() {
                     )}
 
                     {q.explanation && (
-                      <div className="mt-3 p-3 bg-emerald-50/70 border border-emerald-200 rounded-xl text-xs text-emerald-900 space-y-1">
+                      <div className="mt-3 p-3 bg-emerald-50/70 border border-emerald-200 rounded-2xl text-xs text-emerald-900 space-y-1">
                         <p className="font-bold flex items-center gap-1.5 text-emerald-800"><Lightbulb className="size-3.5" /> เฉลยและวิธีทำ:</p>
                         <p className="whitespace-pre-line text-slate-700 pl-5">{q.explanation}</p>
                       </div>
@@ -1767,8 +2237,8 @@ function AdminDashboard() {
               </div>
 
               <div className="pt-4 border-t mt-4 flex gap-3">
-                <button onClick={() => { setManualQuestions(aiResult || []); setExamModalMode("manual"); }} className="flex-1 py-3 border border-primary text-primary font-bold rounded-xl hover:bg-primary/5">แก้ไข/เพิ่มบรรทัดในโหมด Manual</button>
-                <button onClick={() => handleSaveExamToDB(aiResult || [])} className="flex-1 py-3 bg-primary text-white font-bold rounded-xl hover:bg-primary/90 shadow">บันทึกข้อสอบเข้าระบบ</button>
+                <button onClick={() => { setManualQuestions(aiResult || []); setExamModalMode("manual"); }} className="flex-1 py-3.5 border border-primary text-primary font-bold rounded-2xl hover:bg-primary/5">แก้ไข/เพิ่มบรรทัดในโหมด Manual</button>
+                <button onClick={() => handleSaveExamToDB(aiResult || [])} className="flex-1 py-3.5 bg-primary text-white font-bold rounded-2xl hover:bg-primary/90 shadow">บันทึกข้อสอบเข้าระบบ</button>
               </div>
             </div>
           )}

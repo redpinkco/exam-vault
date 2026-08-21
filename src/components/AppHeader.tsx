@@ -1,13 +1,13 @@
 import { Link, useNavigate } from "@tanstack/react-router";
 import { useEffect, useState, useRef } from "react";
 import logo from "@/assets/logo.png";
-import { UserCircle, LogOut, BarChart3, History, ChevronDown, User, Trophy } from "lucide-react";
+import { UserCircle, LogOut, BarChart3, History, ChevronDown, User, Trophy, Sparkles } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 
 export function AppHeader() {
   const navigate = useNavigate();
   const [user, setUser] = useState<any>(null);
-  const [isLoading, setIsLoading] = useState(true); 
+  const [isLoading, setIsLoading] = useState(true);
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
@@ -43,89 +43,90 @@ export function AppHeader() {
   };
 
   return (
-    <header className="sticky top-0 z-40 border-b border-border/60 bg-card/85 backdrop-blur-md">
-      <div className="mx-auto flex h-16 w-full max-w-6xl items-center justify-between px-4 sm:px-6">
+    <header className="sticky top-3 z-40 mx-auto max-w-6xl px-3 sm:px-6">
+      {/* Floating Glass Dock Navbar */}
+      <div className="glass-dock squircle px-4 sm:px-6 h-16 flex items-center justify-between transition-all duration-300">
         
-        {/* โลโก้ด้านซ้าย */}
-        <Link to="/" className="flex items-center gap-3">
-          <span className="flex size-10 items-center justify-center rounded-xl bg-secondary p-1.5">
+        {/* Brand Logo */}
+        <Link to="/" className="flex items-center gap-3 group">
+          <span className="flex size-10 items-center justify-center rounded-2xl bg-gradient-to-br from-primary/10 to-teal-50 border border-primary/20 p-1.5 shadow-inner transition-transform group-hover:scale-105">
             <img src={logo} alt="โลโก้คลังสอบ" width={512} height={512} className="size-full object-contain" />
           </span>
           <span className="flex flex-col leading-tight">
-            <span className="font-display text-lg font-semibold tracking-tight text-foreground">คลังสอบ</span>
-            <span className="text-[11px] text-muted-foreground">Exam Vault</span>
+            <span className="font-display text-lg font-black tracking-tight text-slate-800">คลังสอบ</span>
+            <span className="text-[10px] font-bold tracking-wider text-slate-400 uppercase">Exam Vault</span>
           </span>
         </Link>
 
-        {/* เมนูด้านขวา */}
-        <div className="flex items-center gap-3">
-          {/* ปุ่มทางลัดไปหน้า Leaderboard */}
+        {/* Action Controls */}
+        <div className="flex items-center gap-2.5">
+          {/* Top Scores Button (Squircle Clay) */}
           <Link
             to={"/leaderboard" as any}
-            className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-sm font-bold text-amber-700 bg-amber-50 hover:bg-amber-100 border border-amber-200 transition-colors shadow-sm"
+            className="flex items-center gap-1.5 px-4 py-2 rounded-2xl text-xs font-black text-amber-800 bg-gradient-to-b from-amber-100 to-amber-200/80 hover:from-amber-200 hover:to-amber-300 border border-amber-300/80 shadow-[0_2px_0_0_#d97706] active:translate-y-0.5 active:shadow-none transition-all"
           >
-            <Trophy className="size-4 text-amber-500 fill-amber-500" />
+            <Trophy className="size-3.5 text-amber-600 fill-amber-500" />
             <span className="hidden sm:inline">ตารางจัดอันดับ</span>
           </Link>
 
           {isLoading ? (
-            <div className="h-10 w-32 animate-pulse rounded-lg bg-slate-100"></div>
+            <div className="h-10 w-28 animate-pulse rounded-2xl bg-slate-200/60" />
           ) : user ? (
             <div className="relative" ref={dropdownRef}>
-              <button 
+              <button
                 onClick={() => setIsDropdownOpen(!isDropdownOpen)}
-                className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 transition-colors shadow-sm"
+                className="flex items-center gap-2 rounded-2xl border border-slate-200/80 bg-white/90 px-3.5 py-2 text-xs font-bold text-slate-700 hover:bg-white transition-all shadow-sm active:scale-95"
               >
-                <div className="flex size-6 items-center justify-center rounded-full bg-primary/10 text-primary">
-                  <User className="size-4" />
+                <div className="flex size-5 items-center justify-center rounded-lg bg-primary/10 text-primary">
+                  <User className="size-3.5" />
                 </div>
                 <span className="hidden sm:inline-block max-w-[120px] truncate">
                   {user.email}
                 </span>
-                <ChevronDown className={`size-4 text-slate-400 transition-transform ${isDropdownOpen ? "rotate-180" : ""}`} />
+                <ChevronDown className={`size-3.5 text-slate-400 transition-transform duration-200 ${isDropdownOpen ? "rotate-180" : ""}`} />
               </button>
 
-              {/* Dropdown เมนู */}
+              {/* Squircle Glass Dropdown */}
               {isDropdownOpen && (
-                <div className="absolute right-0 mt-2 w-56 origin-top-right rounded-2xl border border-slate-100 bg-white p-2 shadow-lg ring-1 ring-black/5 animate-in fade-in zoom-in-95 duration-200">
-                  <div className="px-3 py-2 mb-2 border-b border-slate-100">
-                    <p className="text-xs font-medium text-slate-500">ลงชื่อเข้าใช้ด้วย</p>
-                    <p className="text-sm font-bold text-slate-800 truncate">{user.email}</p>
+                <div className="absolute right-0 mt-3 w-60 origin-top-right rounded-3xl border border-white/90 bg-white/95 backdrop-blur-2xl p-2.5 shadow-[0_20px_40px_rgba(0,0,0,0.12)] ring-1 ring-black/5 animate-in fade-in zoom-in-95 duration-200">
+                  <div className="px-3.5 py-2.5 mb-1.5 border-b border-slate-100">
+                    <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">บัญชีผู้ใช้งาน</p>
+                    <p className="text-xs font-black text-slate-800 truncate mt-0.5">{user.email}</p>
                   </div>
-                  
+
                   <div className="flex flex-col gap-1">
-                    <Link 
-                      to={"/leaderboard" as any} 
+                    <Link
+                      to={"/leaderboard" as any}
                       onClick={() => setIsDropdownOpen(false)}
-                      className="flex items-center gap-3 rounded-xl px-3 py-2 text-sm font-medium text-amber-800 hover:bg-amber-50 transition-colors"
+                      className="flex items-center gap-3 rounded-2xl px-3.5 py-2.5 text-xs font-bold text-amber-800 hover:bg-amber-50/80 transition-colors"
                     >
                       <Trophy className="size-4 text-amber-500 fill-amber-500" />
-                      ตารางจัดอันดับ (Top Scores)
+                      ตารางจัดอันดับ (Hall of Fame)
                     </Link>
 
-                    <Link 
-                      to="/dashboard" 
+                    <Link
+                      to="/dashboard"
                       onClick={() => setIsDropdownOpen(false)}
-                      className="flex items-center gap-3 rounded-xl px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50 hover:text-primary transition-colors"
+                      className="flex items-center gap-3 rounded-2xl px-3.5 py-2.5 text-xs font-bold text-slate-600 hover:bg-slate-50 hover:text-primary transition-colors"
                     >
                       <BarChart3 className="size-4" />
                       แดชบอร์ดสรุปคะแนน
                     </Link>
-                    
-                    <Link 
-                      to="/dashboard" 
+
+                    <Link
+                      to="/dashboard"
                       onClick={() => setIsDropdownOpen(false)}
-                      className="flex items-center gap-3 rounded-xl px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50 hover:text-primary transition-colors"
+                      className="flex items-center gap-3 rounded-2xl px-3.5 py-2.5 text-xs font-bold text-slate-600 hover:bg-slate-50 hover:text-primary transition-colors"
                     >
                       <History className="size-4" />
-                      ประวัติการทำข้อสอบ
+                      ประวัติการสอบ & คลังข้อผิด
                     </Link>
                   </div>
 
-                  <div className="mt-2 pt-2 border-t border-slate-100">
-                    <button 
+                  <div className="mt-1.5 pt-1.5 border-t border-slate-100">
+                    <button
                       onClick={handleLogout}
-                      className="flex w-full items-center gap-3 rounded-xl px-3 py-2 text-sm font-medium text-red-600 hover:bg-red-50 transition-colors"
+                      className="flex w-full items-center gap-3 rounded-2xl px-3.5 py-2.5 text-xs font-bold text-rose-600 hover:bg-rose-50 transition-colors"
                     >
                       <LogOut className="size-4" />
                       ออกจากระบบ
@@ -135,16 +136,16 @@ export function AppHeader() {
               )}
             </div>
           ) : (
-            <Link 
-              to="/login" 
-              className="flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-white hover:bg-primary/90 transition-colors shadow-sm"
+            <Link
+              to="/login"
+              className="flex items-center gap-2 rounded-2xl bg-gradient-to-r from-teal-600 to-primary px-4 py-2 text-xs font-bold text-white shadow-[0_3px_0_0_#0f766e] active:translate-y-0.5 active:shadow-none hover:opacity-95 transition-all"
             >
-              <UserCircle className="size-5" />
+              <UserCircle className="size-4" />
               เข้าสู่ระบบ
             </Link>
           )}
         </div>
-        
+
       </div>
     </header>
   );

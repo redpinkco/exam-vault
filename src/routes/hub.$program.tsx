@@ -1,13 +1,12 @@
 import { createFileRoute, Link, notFound } from "@tanstack/react-router";
 import { useEffect, useState, useRef } from "react";
-import { ChevronRight, FileText, Play, Timer, BookOpen, PenTool, Loader2, Eraser, Sparkles, Video, FilePenLine } from "lucide-react";
+import { ChevronRight, FileText, Play, Timer, BookOpen, PenTool, Loader2, Eraser, Sparkles, Video, FilePenLine, ChevronLeft, Layers } from "lucide-react";
 import { PageShell } from "@/components/PageShell";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { PROGRAMS, YEARS, isProgramId } from "@/lib/exam-data";
+import { PROGRAMS, isProgramId } from "@/lib/exam-data";
 import { supabase } from "@/lib/supabase";
-import SignatureCanvas from 'react-signature-canvas'; 
+import SignatureCanvas from "react-signature-canvas";
 
 export const Route = createFileRoute("/hub/$program")({
   loader: ({ params }) => {
@@ -23,18 +22,23 @@ const DB_PROGRAM_MAP: Record<string, string> = {
   regular: "ภาคปกติ",
 };
 
-// ฟังก์ชันจับคู่วิชาให้ตรงกัน แม้ชื่อย่อหรือชื่อเต็มต่างกัน
+// ฟังก์ชันจัดกลุ่มชื่อวิชาแบบตรงตัว ไม่ให้ 'คณิต' ไปทับกับ 'ความถนัดด้านคณิตศาสตร์'
+const normalizeSubject = (name: string) => {
+  const n = name.trim().toLowerCase();
+  if (n === "คณิต" || n === "คณิตศาสตร์" || n === "math") return "คณิตศาสตร์";
+  if (n === "วิทย์" || n === "วิทยาศาสตร์" || n === "science") return "วิทยาศาสตร์";
+  if (n === "อังกฤษ" || n === "ภาษาอังกฤษ" || n === "english") return "ภาษาอังกฤษ";
+  if (n === "ไทย" || n === "ภาษาไทย" || n === "thai") return "ภาษาไทย";
+  if (n === "สังคม" || n === "สังคมศึกษา" || n === "social") return "สังคมศึกษา";
+  return n;
+};
+
 const matchSubject = (dbSubject: string | undefined, selectedSubject: string) => {
   if (selectedSubject === "all") return true;
   if (!dbSubject) return false;
-  const cleanDb = dbSubject.trim().toLowerCase();
-  const cleanSelected = selectedSubject.trim().toLowerCase();
-  return cleanDb.includes(cleanSelected) || cleanSelected.includes(cleanDb);
+  return normalizeSubject(dbSubject) === normalizeSubject(selectedSubject);
 };
 
-// ==========================================
-// 💡 คอมโพเนนต์ย่อย: กระดานฝึกเขียนอัจฉริยะ (AI ตรวจลายมือ)
-// ==========================================
 const SmartPracticeCanvas = ({ subject }: { subject: string }) => {
   const sigCanvas = useRef<any>(null);
   const [result, setResult] = useState<string>("");
@@ -52,16 +56,15 @@ const SmartPracticeCanvas = ({ subject }: { subject: string }) => {
 
     try {
       const imageBase64 = sigCanvas.current?.getTrimmedCanvas().toDataURL("image/jpeg", 0.9).split(",")[1];
-      const apiKey = "AQ.Ab8RN6LyaWE8FG3kCDnfyGsKsiDEoSVaTT3m0TMnClGY5-Vyow"; 
-      
       const prompt = `อ่านลายมือในรูปภาพนี้ (อาจจะเป็นตัวเลข, ภาษาอังกฤษ หรือภาษาไทย) ตอบกลับมาเฉพาะคำหรือตัวเลขที่อ่านได้อย่างแม่นยำที่สุด ห้ามมีคำอธิบายเพิ่มเติม หากอ่านไม่ออกให้ตอบว่า '-'`;
 
-      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent`, {
+      const response = await fetch(`/api/gemini`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", "x-goog-api-key": apiKey },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          contents: [{ parts: [{ text: prompt }, { inline_data: { mime_type: "image/jpeg", data: imageBase64 } }] }]
-        })
+          model: "gemini-2.5-flash",
+          contents: [{ parts: [{ text: prompt }, { inline_data: { mime_type: "image/jpeg", data: imageBase64 } }] }],
+        }),
       });
 
       const data = await response.json();
@@ -75,50 +78,64 @@ const SmartPracticeCanvas = ({ subject }: { subject: string }) => {
   };
 
   return (
-    <div className="mt-4 p-5 bg-amber-50/50 rounded-2xl border border-amber-200 shadow-sm">
+    <div className="mt-4 p-4 sm:p-5 rounded-3xl backdrop-blur-xl bg-amber-50/60 border border-amber-200/80 shadow-sm w-full">
       <div className="flex items-center justify-between mb-3">
-        <h4 className="font-bold text-amber-900 flex items-center gap-2">
-          <PenTool className="size-4 text-amber-600" /> สมุดจด/ฝึกเขียนคำศัพท์
+        <h4 className="font-bold text-amber-900 flex items-center gap-2 text-xs sm:text-sm">
+          <PenTool className="size-4 text-amber-600" /> สมุดทดเลข / ฝึกเขียน ({subject})
         </h4>
-        <span className="text-xs text-amber-600 bg-amber-100 px-2 py-1 rounded-md font-medium">AI Handwriting</span>
+        <span className="text-[10px] sm:text-xs font-bold text-amber-700 bg-amber-200/60 px-2.5 py-0.5 rounded-full">
+          AI Powered
+        </span>
       </div>
-      
-      <div 
-        className="rounded-xl overflow-hidden border border-amber-300 shadow-inner bg-white relative"
+
+      <div
+        className="rounded-2xl overflow-hidden border-2 border-amber-200 bg-white relative shadow-inner"
         style={{
-          backgroundImage: 'repeating-linear-gradient(transparent, transparent 31px, #fbbf24 31px, #fbbf24 32px)',
-          backgroundSize: '100% 32px',
-          backgroundPosition: '0 8px'
+          backgroundImage: "repeating-linear-gradient(transparent, transparent 31px, #fef3c7 31px, #fef3c7 32px)",
+          backgroundSize: "100% 32px",
+          backgroundPosition: "0 8px",
         }}
       >
         {/* @ts-ignore */}
-        <SignatureCanvas 
+        <SignatureCanvas
           ref={sigCanvas}
-          penColor="blue"
-          canvasProps={{ className: "w-full h-40 cursor-crosshair" }}
+          penColor="#1e3a8a"
+          canvasProps={{ className: "w-full h-36 cursor-crosshair" }}
         />
       </div>
 
-      <div className="mt-4 flex flex-col sm:flex-row items-center gap-3">
+      <div className="mt-3 flex flex-col sm:flex-row items-center gap-2.5">
         <div className="flex gap-2 w-full sm:w-auto">
-          <Button onClick={handleClear} variant="outline" className="flex-1 bg-white border-amber-300 text-amber-700 hover:bg-amber-100">
-            <Eraser className="size-4 mr-2" /> ลบ
-          </Button>
-          <Button onClick={handleCheckHandwriting} disabled={isChecking} className="flex-1 bg-amber-500 hover:bg-amber-600 text-white font-bold">
-            {isChecking ? <Loader2 className="size-4 animate-spin mr-2" /> : <Sparkles className="size-4 mr-2" />}
-            AI ตรวจลายมือ
-          </Button>
+          <button
+            onClick={handleClear}
+            className="flex-1 sm:flex-initial px-4 py-2 rounded-xl border border-amber-300 text-amber-800 bg-white/80 hover:bg-white text-xs font-bold transition shadow-sm active:scale-95 flex items-center justify-center gap-1.5"
+          >
+            <Eraser className="size-3.5" /> ล้าง
+          </button>
+          <button
+            onClick={handleCheckHandwriting}
+            disabled={isChecking}
+            className="flex-1 sm:flex-initial px-4 py-2 rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 text-white font-bold text-xs transition disabled:opacity-50 shadow-[0_3px_0_0_#b45309] active:translate-y-0.5 active:shadow-none flex items-center justify-center gap-1.5"
+          >
+            {isChecking ? <Loader2 className="size-3.5 animate-spin" /> : <Sparkles className="size-3.5" />}
+            AI อ่านลายมือ
+          </button>
         </div>
-        
-        <div className="flex-1 w-full bg-white p-2.5 rounded-lg border border-amber-200 min-h-[44px] flex items-center px-4">
+
+        <div className="flex-1 w-full bg-white/90 p-2 rounded-2xl border border-amber-200/80 min-h-[40px] flex items-center px-3 shadow-inner">
           {isChecking ? (
-            <span className="text-sm text-slate-400 animate-pulse">กำลังอ่านลายมือ...</span>
+            <span className="text-xs text-slate-400 animate-pulse flex items-center gap-1.5">
+              <Loader2 className="size-3.5 animate-spin" /> กำลังอ่านลายมือ...
+            </span>
           ) : result ? (
-            <span className="text-sm font-bold text-emerald-600 flex items-center gap-2">
-              สิ่งที่คุณเขียนคือ: <span className="text-lg text-emerald-700 font-black tracking-wider bg-emerald-50 px-2 py-0.5 rounded">{result}</span>
+            <span className="text-xs font-bold text-emerald-700 flex items-center gap-2">
+              ผลลัพธ์:
+              <span className="text-xs sm:text-sm text-emerald-900 font-black bg-emerald-100/80 px-2 py-0.5 rounded-lg">
+                {result}
+              </span>
             </span>
           ) : (
-            <span className="text-sm text-slate-400">ผลการอ่านลายมือจะแสดงที่นี่...</span>
+            <span className="text-xs text-slate-400">ผลการอ่านจะแสดงที่นี่...</span>
           )}
         </div>
       </div>
@@ -126,17 +143,12 @@ const SmartPracticeCanvas = ({ subject }: { subject: string }) => {
   );
 };
 
-// ==========================================
-// 💡 คอมโพเนนต์หลัก: ExamHub (หน้านักเรียน)
-// ==========================================
 function ExamHub() {
   const { program } = Route.useLoaderData();
-  
-  // เริ่มต้นหน้าเว็บที่โหมด "exam" เพื่อให้ตรงกับข้อสอบที่มีอยู่
   const [activeMode, setActiveMode] = useState<"study" | "worksheet" | "exam">("exam");
   const [subject, setSubject] = useState<string>("all");
   const [year, setYear] = useState<string>("all");
-  
+
   const [allPapers, setAllPapers] = useState<any[]>([]);
   const [allLessons, setAllLessons] = useState<any[]>([]);
   const [allWorksheets, setAllWorksheets] = useState<any[]>([]);
@@ -146,32 +158,29 @@ function ExamHub() {
     const fetchData = async () => {
       setIsLoading(true);
       const dbProgram = DB_PROGRAM_MAP[program.id];
-      
-      // ดึงข้อมูลข้อสอบ
+
       const { data: examsData } = await supabase
-        .from('exams')
-        .select('*')
-        .ilike('program', `%${dbProgram}%`)
-        .eq('status', 'published');
+        .from("exams")
+        .select("*")
+        .ilike("program", `%${dbProgram}%`)
+        .eq("status", "published");
       if (examsData) setAllPapers(examsData);
 
-      // ดึงข้อมูลบทเรียน
       const { data: lessonsData } = await supabase
-        .from('lessons')
-        .select('*')
-        .ilike('program', `%${dbProgram}%`);
+        .from("lessons")
+        .select("*")
+        .ilike("program", `%${dbProgram}%`);
       if (lessonsData) setAllLessons(lessonsData);
 
-      // ดึงข้อมูลชีทแบบฝึกหัด
       const { data: worksheetsData } = await supabase
-        .from('worksheets')
-        .select('*')
-        .ilike('program', `%${dbProgram}%`);
+        .from("worksheets")
+        .select("*")
+        .ilike("program", `%${dbProgram}%`);
       if (worksheetsData) setAllWorksheets(worksheetsData);
 
       setIsLoading(false);
     };
-    
+
     fetchData();
   }, [program.id]);
 
@@ -183,224 +192,312 @@ function ExamHub() {
 
   return (
     <PageShell>
-      <nav aria-label="breadcrumb" className="flex flex-wrap items-center gap-1.5 text-sm text-muted-foreground">
-        <Link to="/" className="transition-colors hover:text-foreground">ป.6</Link>
-        <ChevronRight className="size-4" />
-        <Link to="/programs" className="transition-colors hover:text-foreground">แผนการเรียน</Link>
-        <ChevronRight className="size-4" />
-        <span className="font-medium text-foreground">เตรียมตัวสอบ {program.name}</span>
-      </nav>
+      <div className="w-full max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 pb-16">
+        {/* Navigation Breadcrumb */}
+        <nav aria-label="breadcrumb" className="flex flex-wrap items-center gap-1.5 text-xs sm:text-sm text-slate-500 mb-6">
+          <Link to="/programs" className="inline-flex items-center gap-1 hover:text-primary font-medium transition-colors">
+            <ChevronLeft className="size-4" /> แผนการเรียน
+          </Link>
+          <ChevronRight className="size-3.5 text-slate-300" />
+          <span className="font-bold text-slate-800">ศูนย์สอบ {program.name}</span>
+        </nav>
 
-      <div className="mt-8 flex flex-col md:flex-row md:items-end justify-between gap-6">
-        <div>
-          <h1 className="text-3xl font-bold sm:text-4xl">ศูนย์การเรียนรู้ {program.name}</h1>
-          <p className="mt-2 text-base text-muted-foreground">{program.fullName}</p>
+        {/* Header Title & Mode Selector */}
+        <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-6 mb-8">
+          <div>
+            <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-primary/10 text-primary text-xs font-bold border border-primary/20 mb-2">
+              <Layers className="size-3.5" /> ศูนย์การเรียนรู้ครบวงจร
+            </div>
+            <h1 className="text-3xl sm:text-4xl font-black text-slate-900 tracking-tight">
+              ศูนย์สอบ {program.name}
+            </h1>
+            <p className="mt-1 text-xs sm:text-sm text-slate-500">{program.fullName}</p>
+          </div>
+
+          {/* Mode Selector */}
+          <div className="flex bg-white/70 backdrop-blur-md p-1.5 rounded-2xl border border-slate-200/80 shadow-sm overflow-x-auto w-full lg:w-auto">
+            <button
+              onClick={() => setActiveMode("study")}
+              className={`flex-1 lg:flex-initial shrink-0 flex items-center justify-center gap-2 py-2.5 px-5 rounded-xl text-xs sm:text-sm font-bold transition-all ${
+                activeMode === "study"
+                  ? "bg-slate-900 text-white shadow-md"
+                  : "text-slate-500 hover:text-slate-800"
+              }`}
+            >
+              <BookOpen className="size-4" /> ห้องเรียน
+            </button>
+
+            <button
+              onClick={() => setActiveMode("worksheet")}
+              className={`flex-1 lg:flex-initial shrink-0 flex items-center justify-center gap-2 py-2.5 px-5 rounded-xl text-xs sm:text-sm font-bold transition-all ${
+                activeMode === "worksheet"
+                  ? "bg-emerald-600 text-white shadow-md"
+                  : "text-slate-500 hover:text-slate-800"
+              }`}
+            >
+              <FilePenLine className="size-4" /> แบบฝึกหัด
+            </button>
+
+            <button
+              onClick={() => setActiveMode("exam")}
+              className={`flex-1 lg:flex-initial shrink-0 flex items-center justify-center gap-2 py-2.5 px-5 rounded-xl text-xs sm:text-sm font-bold transition-all ${
+                activeMode === "exam"
+                  ? "bg-primary text-white shadow-md"
+                  : "text-slate-500 hover:text-slate-800"
+              }`}
+            >
+              <PenTool className="size-4" /> คลังข้อสอบ
+            </button>
+          </div>
         </div>
 
-        {/* เมนู 3 โหมด */}
-        <div className="flex bg-slate-100 p-1.5 rounded-2xl w-full md:w-auto shadow-inner overflow-x-auto">
-          <button 
-            onClick={() => setActiveMode("study")}
-            className={`shrink-0 md:w-32 flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl text-sm font-bold transition-all ${activeMode === "study" ? "bg-white text-primary shadow-sm" : "text-slate-500 hover:text-slate-700"}`}
-          >
-            <BookOpen className="size-4" /> ห้องเรียน
-          </button>
-          
-          <button 
-            onClick={() => setActiveMode("worksheet")}
-            className={`shrink-0 md:w-36 flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl text-sm font-bold transition-all ${activeMode === "worksheet" ? "bg-white text-emerald-600 shadow-sm" : "text-slate-500 hover:text-slate-700"}`}
-          >
-            <FilePenLine className="size-4" /> แบบฝึกหัด
-          </button>
-
-          <button 
-            onClick={() => setActiveMode("exam")}
-            className={`shrink-0 md:w-32 flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl text-sm font-bold transition-all ${activeMode === "exam" ? "bg-white text-rose-600 shadow-sm" : "text-slate-500 hover:text-slate-700"}`}
-          >
-            <PenTool className="size-4" /> ห้องสอบ
-          </button>
-        </div>
-      </div>
-
-      {/* กรองวิชา */}
-      <section className="mt-10 animate-in fade-in" aria-labelledby="subjects-heading">
-        <h2 id="subjects-heading" className="text-lg font-bold text-slate-800">กรองวิชา</h2>
-        <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
-          {program.subjects.map((s) => {
-            const active = subject === s;
-            return (
-              <button
-                key={s}
-                type="button"
-                onClick={() => setSubject(active ? "all" : s)}
-                className={`card-surface flex flex-col items-start gap-2 p-5 text-left transition-all rounded-2xl border-2 ${
-                  active ? "border-primary bg-primary/5 shadow-sm" : "border-transparent hover:border-slate-200"
-                }`}
-              >
-                <BookOpen className={`size-6 ${active ? "text-primary" : "text-slate-400"}`} />
-                <span className={`text-base font-bold ${active ? "text-primary" : "text-slate-700"}`}>{s}</span>
+        {/* Subject Filter Grid */}
+        <section className="mb-8">
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="text-xs font-bold uppercase tracking-wider text-slate-400">เลือกวิชาที่ต้องการฝึกฝน</h2>
+            {subject !== "all" && (
+              <button onClick={() => setSubject("all")} className="text-xs font-bold text-primary hover:underline">
+                แสดงทุกวิชา
               </button>
-            );
-          })}
-        </div>
-      </section>
-
-      {/* โหมด 1: ห้องเรียน */}
-      {activeMode === "study" && (
-        <div className="animate-in fade-in slide-in-from-bottom-2 duration-300 mt-12">
-          <div className="flex flex-wrap items-end justify-between gap-4 mb-6">
-            <div>
-              <h2 className="text-lg font-bold text-slate-800">เนื้อหาบทเรียน</h2>
-              <p className="text-sm text-muted-foreground mt-1">พบ {lessons.length} บทเรียนในหมวดหมู่นี้</p>
-            </div>
+            )}
           </div>
+          
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3">
+            <button
+              onClick={() => setSubject("all")}
+              className={`p-4 rounded-2xl border text-left transition-all backdrop-blur-md ${
+                subject === "all"
+                  ? "bg-primary text-white border-primary shadow-[0_4px_12px_rgba(15,118,110,0.25)] font-bold -translate-y-0.5"
+                  : "bg-white/70 border-white/80 hover:bg-white text-slate-700 shadow-sm"
+              }`}
+            >
+              <span className="text-[10px] opacity-70 block mb-1">ทั้งหมด</span>
+              <span className="font-black text-sm">ทุกวิชา</span>
+            </button>
 
-          {isLoading ? (
-            <div className="mt-12 flex flex-col items-center text-slate-400">
-              <Loader2 className="size-8 animate-spin mb-4 text-primary" />
-              <p>กำลังโหลดเนื้อหา...</p>
+            {program.subjects.map((s: string) => {
+              const active = subject === s;
+              return (
+                <button
+                  key={s}
+                  onClick={() => setSubject(s)}
+                  className={`p-4 rounded-2xl border text-left transition-all backdrop-blur-md ${
+                    active
+                      ? "bg-primary text-white border-primary shadow-[0_4px_12px_rgba(15,118,110,0.25)] font-bold -translate-y-0.5"
+                      : "bg-white/70 border-white/80 hover:bg-white text-slate-700 shadow-sm"
+                  }`}
+                >
+                  <span className="text-[10px] opacity-70 block mb-1">รายวิชา</span>
+                  <span className="font-black text-sm line-clamp-1">{s}</span>
+                </button>
+              );
+            })}
+          </div>
+        </section>
+
+        {/* Mode 1: Study Classroom */}
+        {activeMode === "study" && (
+          <div className="animate-in fade-in duration-300">
+            <div className="flex items-center justify-between mb-6">
+              <div>
+                <h2 className="text-lg font-black text-slate-800">เนื้อหาบทเรียน</h2>
+                <p className="text-xs text-slate-500">พบ {lessons.length} บทเรียนในหมวดหมู่นี้</p>
+              </div>
             </div>
-          ) : (
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              {lessons.map((lesson) => (
-                <div key={lesson.id} className="card-surface p-6 rounded-2xl border border-slate-200 shadow-sm flex flex-col">
-                  <div className="flex justify-between items-start mb-4">
+
+            {isLoading ? (
+              <div className="min-h-[30vh] flex flex-col items-center justify-center text-slate-400 gap-2">
+                <Loader2 className="size-8 animate-spin text-primary" />
+                <p className="text-xs font-semibold">กำลังโหลดบทเรียน...</p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                {lessons.map((lesson) => (
+                  <div
+                    key={lesson.id}
+                    className="backdrop-blur-xl bg-white/85 border border-white/90 p-6 sm:p-7 rounded-3xl shadow-[0_10px_35px_rgba(0,0,0,0.04)] flex flex-col justify-between"
+                  >
                     <div>
-                      <Badge className="bg-indigo-100 text-indigo-700 hover:bg-indigo-200 border-none mb-2">{lesson.subject}</Badge>
-                      <h3 className="text-xl font-bold text-slate-800 leading-tight">{lesson.title}</h3>
+                      <div className="flex items-center justify-between mb-3">
+                        <Badge className="bg-indigo-50 text-indigo-700 border border-indigo-200/60 font-bold px-3 py-1 rounded-xl">
+                          {lesson.subject}
+                        </Badge>
+                      </div>
+                      <h3 className="text-lg sm:text-xl font-black text-slate-800 leading-snug">{lesson.title}</h3>
+                      <p className="text-xs text-slate-500 mt-2 leading-relaxed">{lesson.description || "ไม่มีคำอธิบายเพิ่มเติม"}</p>
+                    </div>
+
+                    <div className="mt-6">
+                      <div className="flex flex-wrap gap-2.5 mb-4">
+                        {lesson.video_url && (
+                          <a
+                            href={lesson.video_url}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="flex-1 min-w-[130px] flex items-center justify-center gap-2 bg-rose-50 text-rose-700 hover:bg-rose-100 px-4 py-2.5 rounded-2xl text-xs font-bold transition-all border border-rose-200/60 shadow-sm"
+                          >
+                            <Video className="size-4" /> ดูวิดีโอสอน
+                          </a>
+                        )}
+                        {lesson.pdf_url && (
+                          <a
+                            href={lesson.pdf_url}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="flex-1 min-w-[130px] flex items-center justify-center gap-2 bg-blue-50 text-blue-700 hover:bg-blue-100 px-4 py-2.5 rounded-2xl text-xs font-bold transition-all border border-blue-200/60 shadow-sm"
+                          >
+                            <FileText className="size-4" /> เอกสาร PDF
+                          </a>
+                        )}
+                      </div>
+                      <SmartPracticeCanvas subject={lesson.subject} />
                     </div>
                   </div>
-                  
-                  <p className="text-sm text-slate-500 mb-6 flex-1">{lesson.description || "ไม่มีคำอธิบายเพิ่มเติม"}</p>
+                ))}
 
-                  <div className="flex flex-wrap gap-3 mb-6">
-                    {lesson.video_url && (
-                      <a href={lesson.video_url} target="_blank" rel="noreferrer" className="flex-1 min-w-[140px] flex items-center justify-center gap-2 bg-rose-50 text-rose-600 hover:bg-rose-100 px-4 py-2.5 rounded-xl font-bold transition-colors">
-                        <Video className="size-4" /> ดูวิดีโอเรียน
-                      </a>
-                    )}
-                    {lesson.pdf_url && (
-                      <a href={lesson.pdf_url} target="_blank" rel="noreferrer" className="flex-1 min-w-[140px] flex items-center justify-center gap-2 bg-blue-50 text-blue-600 hover:bg-blue-100 px-4 py-2.5 rounded-xl font-bold transition-colors">
-                        <FileText className="size-4" /> เอกสารประกอบ
-                      </a>
-                    )}
+                {lessons.length === 0 && (
+                  <div className="col-span-full backdrop-blur-md bg-white/40 border border-dashed border-slate-300 p-16 text-center text-slate-400 rounded-3xl">
+                    <BookOpen className="size-10 mx-auto mb-2 opacity-30" />
+                    <p className="font-bold text-sm text-slate-600">ยังไม่มีเนื้อหาบทเรียนในหมวดนี้</p>
                   </div>
-
-                  <SmartPracticeCanvas subject={lesson.subject} />
-                </div>
-              ))}
-
-              {lessons.length === 0 && (
-                <div className="col-span-1 lg:col-span-2 card-surface p-16 text-center text-slate-400 border-dashed border-2 rounded-3xl">
-                  <BookOpen className="size-12 mx-auto mb-3 opacity-20" />
-                  <p className="text-lg font-medium text-slate-500 mb-1">ยังไม่มีเนื้อหาบทเรียน</p>
-                  <p className="text-sm">รอคุณครูอัปเดตเนื้อหาในระบบเพิ่มเติมนะครับ</p>
-                </div>
-              )}
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* โหมด 2: แบบฝึกหัด */}
-      {activeMode === "worksheet" && (
-        <div className="animate-in fade-in slide-in-from-bottom-2 duration-300 mt-12">
-          <div className="flex flex-wrap items-end justify-between gap-4 mb-6">
-            <div>
-              <h2 className="text-lg font-bold text-slate-800">ชีทแบบฝึกหัด (วาดเขียนออนไลน์)</h2>
-              <p className="text-sm text-muted-foreground mt-1">พบ {worksheets.length} ชุดแบบฝึกหัดที่พร้อมให้ฝึกฝน</p>
-            </div>
+                )}
+              </div>
+            )}
           </div>
+        )}
 
-          {isLoading ? (
-            <div className="mt-12 flex flex-col items-center text-slate-400">
-              <Loader2 className="size-8 animate-spin mb-4 text-emerald-600" />
-              <p>กำลังโหลดแบบฝึกหัด...</p>
+        {/* Mode 2: Worksheets */}
+        {activeMode === "worksheet" && (
+          <div className="animate-in fade-in duration-300">
+            <div className="flex items-center justify-between mb-6">
+              <div>
+                <h2 className="text-lg font-black text-slate-800">ชีทแบบฝึกหัด</h2>
+                <p className="text-xs text-slate-500">พบ {worksheets.length} ชุดแบบฝึกหัด</p>
+              </div>
             </div>
-          ) : (
-            <ul className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {worksheets.map((ws) => (
-                <li key={ws.id} className="card-surface flex flex-col justify-between p-6 rounded-2xl border border-slate-100 hover:border-emerald-500/30 transition-colors shadow-sm">
-                  <div>
-                    <Badge className="bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border-none mb-3">{ws.subject}</Badge>
-                    <h3 className="text-lg font-bold text-slate-800">{ws.title}</h3>
-                    <div className="mt-3 flex items-center gap-4 text-sm font-medium text-slate-500">
-                      <span className="flex items-center gap-1.5 bg-slate-50 px-2.5 py-1 rounded-md"><FileText className="size-4 text-slate-400" /> {ws.pages?.length || 0} หน้า</span>
+
+            {isLoading ? (
+              <div className="min-h-[30vh] flex flex-col items-center justify-center text-slate-400 gap-2">
+                <Loader2 className="size-8 animate-spin text-emerald-600" />
+                <p className="text-xs font-semibold">กำลังโหลดแบบฝึกหัด...</p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+                {worksheets.map((ws) => (
+                  <div
+                    key={ws.id}
+                    className="backdrop-blur-xl bg-white/85 border border-white/90 p-6 rounded-3xl shadow-[0_10px_35px_rgba(0,0,0,0.04)] flex flex-col justify-between"
+                  >
+                    <div>
+                      <Badge className="bg-emerald-50 text-emerald-700 border border-emerald-200/60 font-bold px-3 py-1 rounded-xl mb-3">
+                        {ws.subject}
+                      </Badge>
+                      <h3 className="text-base sm:text-lg font-black text-slate-800 line-clamp-2">{ws.title}</h3>
+                      <p className="text-xs text-slate-400 mt-2 flex items-center gap-1">
+                        <FileText className="size-3.5" /> ความยาว: {ws.pages?.length || 0} หน้า
+                      </p>
                     </div>
-                  </div>
-                  <Button asChild className="mt-6 w-full rounded-xl bg-emerald-50 text-emerald-600 hover:bg-emerald-600 hover:text-white transition-all font-bold group">
-                    <Link to="/worksheet/$id" params={{ id: String(ws.id) }}>
-                      <FilePenLine className="size-4 mr-2 transition-transform group-hover:scale-110" /> ทำแบบฝึกหัด
-                    </Link>
-                  </Button>
-                </li>
-              ))}
-              {worksheets.length === 0 && (
-                <li className="col-span-1 md:col-span-2 card-surface p-12 text-center text-slate-400 border-dashed border-2 rounded-2xl">
-                  ยังไม่มีชีทแบบฝึกหัดในระบบ หรือไม่พบข้อมูลตามตัวกรอง
-                </li>
-              )}
-            </ul>
-          )}
-        </div>
-      )}
 
-      {/* โหมด 3: ห้องสอบ */}
-      {activeMode === "exam" && (
-        <div className="animate-in fade-in slide-in-from-bottom-2 duration-300 mt-12">
-          <div className="flex flex-wrap items-end justify-between gap-4 mb-6">
-            <div>
-              <h2 className="text-lg font-bold text-slate-800">คลังข้อสอบเก่า</h2>
-              <p className="text-sm text-muted-foreground mt-1">พบ {papers.length} ชุดข้อสอบที่พร้อมให้ฝึกฝน</p>
-            </div>
-            <div className="flex flex-wrap gap-3">
+                    <Link
+                      to="/worksheet/$id"
+                      params={{ id: String(ws.id) }}
+                      className="mt-6 w-full py-3.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-2xl shadow-[0_4px_0_0_#065f46] active:translate-y-0.5 active:shadow-none transition-all flex items-center justify-center gap-2 text-xs sm:text-sm"
+                    >
+                      <FilePenLine className="size-4" /> เริ่มทำแบบฝึกหัด
+                    </Link>
+                  </div>
+                ))}
+
+                {worksheets.length === 0 && (
+                  <div className="col-span-full backdrop-blur-md bg-white/40 border border-dashed border-slate-300 p-16 text-center text-slate-400 rounded-3xl">
+                    <FilePenLine className="size-10 mx-auto mb-2 opacity-30" />
+                    <p className="font-bold text-sm text-slate-600">ยังไม่มีแบบฝึกหัดในหมวดนี้</p>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Mode 3: Exam Papers */}
+        {activeMode === "exam" && (
+          <div className="animate-in fade-in duration-300">
+            <div className="flex flex-wrap items-center justify-between gap-4 mb-6">
+              <div>
+                <h2 className="text-lg font-black text-slate-800">คลังข้อสอบเก่าเสมือนจริง</h2>
+                <p className="text-xs text-slate-500">พบ {papers.length} ชุดข้อสอบพร้อมระบบจับเวลา</p>
+              </div>
+
               <Select value={year} onValueChange={setYear}>
-                <SelectTrigger className="w-36 rounded-xl bg-white border-slate-200">
+                <SelectTrigger className="w-40 rounded-2xl bg-white/80 border-slate-200 backdrop-blur-md font-bold text-xs">
                   <SelectValue placeholder="ปีการศึกษา" />
                 </SelectTrigger>
-                <SelectContent className="rounded-xl">
+                <SelectContent className="rounded-2xl">
                   <SelectItem value="all">ทุกปีการศึกษา</SelectItem>
-                  <SelectItem value="2566">ปี 2566</SelectItem>
-                  <SelectItem value="2565">ปี 2565</SelectItem>
-                  <SelectItem value="2564">ปี 2564</SelectItem>
+                  <SelectItem value="2566">ปีการศึกษา 2566</SelectItem>
+                  <SelectItem value="2565">ปีการศึกษา 2565</SelectItem>
+                  <SelectItem value="2564">ปีการศึกษา 2564</SelectItem>
+                  <SelectItem value="2563">ปีการศึกษา 2563</SelectItem>
+                  <SelectItem value="2562">ปีการศึกษา 2562</SelectItem>
                 </SelectContent>
               </Select>
             </div>
-          </div>
 
-          {isLoading ? (
-            <div className="mt-12 flex flex-col items-center text-slate-400">
-              <Loader2 className="size-8 animate-spin mb-4 text-rose-600" />
-              <p>กำลังโหลดข้อสอบ...</p>
-            </div>
-          ) : (
-            <ul className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {papers.map((paper) => (
-                <li key={paper.id} className="card-surface flex flex-col justify-between p-6 rounded-2xl border border-slate-100 hover:border-rose-500/30 transition-colors shadow-sm">
-                  <div>
-                    <Badge className="bg-slate-100 text-slate-600 hover:bg-slate-200 border-none mb-3">ปี {paper.year}</Badge>
-                    <h3 className="text-lg font-bold text-slate-800">{paper.title}</h3>
-                    <div className="mt-3 flex items-center gap-4 text-sm font-medium text-slate-500">
-                      <span className="flex items-center gap-1.5 bg-slate-50 px-2.5 py-1 rounded-md"><FileText className="size-4 text-slate-400" /> {paper.total_questions} ข้อ</span>
-                      <span className="flex items-center gap-1.5 bg-slate-50 px-2.5 py-1 rounded-md"><Timer className="size-4 text-slate-400" /> {paper.is_timed === false ? "ไม่จับเวลา" : `${paper.duration_minutes || 90} นาที`}</span>
+            {isLoading ? (
+              <div className="min-h-[30vh] flex flex-col items-center justify-center text-slate-400 gap-2">
+                <Loader2 className="size-8 animate-spin text-primary" />
+                <p className="text-xs font-semibold">กำลังโหลดชุดข้อสอบ...</p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+                {papers.map((paper) => (
+                  <div
+                    key={paper.id}
+                    className="backdrop-blur-xl bg-white/85 border border-white/90 p-6 sm:p-7 rounded-3xl shadow-[0_10px_35px_rgba(0,0,0,0.04)] hover:shadow-lg transition-all flex flex-col justify-between group"
+                  >
+                    <div>
+                      <div className="flex items-center justify-between mb-3">
+                        <span className="text-[11px] font-black px-3 py-1 rounded-xl bg-slate-100 text-slate-600 border border-slate-200">
+                          ปี {paper.year}
+                        </span>
+                        <span className="text-xs font-bold text-primary bg-primary/10 px-3 py-1 rounded-xl border border-primary/20">
+                          วิชา {paper.subject}
+                        </span>
+                      </div>
+
+                      <h3 className="text-base sm:text-lg font-black text-slate-800 mt-2 line-clamp-2">{paper.title}</h3>
+
+                      <div className="mt-4 flex items-center gap-3 text-xs font-bold text-slate-500">
+                        <span className="flex items-center gap-1.5 bg-slate-50 px-2.5 py-1.5 rounded-xl border border-slate-100">
+                          <FileText className="size-3.5 text-slate-400" /> {paper.total_questions || paper.questions?.length || 0} ข้อ
+                        </span>
+                        <span className="flex items-center gap-1.5 bg-slate-50 px-2.5 py-1.5 rounded-xl border border-slate-100">
+                          <Timer className="size-3.5 text-slate-400" /> {paper.is_timed === false ? "ไม่จับเวลา" : `${paper.duration_minutes || 90} นาที`}
+                        </span>
+                      </div>
                     </div>
-                  </div>
-                  <Button asChild className="mt-6 w-full rounded-xl bg-rose-50 text-rose-600 hover:bg-rose-600 hover:text-white transition-all font-bold group">
-                    <Link to="/exam/$program/$subject/$year" params={{ program: program.id, subject: paper.subject, year: String(paper.year) }}>
-                      <Play className="size-4 mr-2 transition-transform group-hover:scale-110" /> เริ่มทำข้อสอบ
+
+                    <Link
+                      to="/exam/$program/$subject/$year"
+                      params={{ program: program.id, subject: paper.subject, year: String(paper.year) }}
+                      className="mt-6 w-full py-3.5 bg-gradient-to-r from-teal-600 to-primary text-white font-bold rounded-2xl shadow-[0_4px_0_0_#0f766e] active:translate-y-0.5 active:shadow-none transition-all flex items-center justify-center gap-2 text-xs sm:text-sm"
+                    >
+                      <Play className="size-4 fill-white" /> เริ่มทำข้อสอบชุดนี้
                     </Link>
-                  </Button>
-                </li>
-              ))}
-              {papers.length === 0 && (
-                <li className="col-span-1 md:col-span-2 card-surface p-12 text-center text-slate-400 border-dashed border-2 rounded-2xl">
-                  ยังไม่มีชุดข้อสอบในระบบ หรือไม่พบข้อมูลตามตัวกรอง
-                </li>
-              )}
-            </ul>
-          )}
-        </div>
-      )}
+                  </div>
+                ))}
+
+                {papers.length === 0 && (
+                  <div className="col-span-full backdrop-blur-md bg-white/40 border border-dashed border-slate-300 p-16 text-center text-slate-400 rounded-3xl">
+                    <FileText className="size-10 mx-auto mb-2 opacity-30" />
+                    <p className="font-bold text-sm text-slate-600">ไม่พบชุดข้อสอบตามเงื่อนไขที่เลือก</p>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
     </PageShell>
   );
 }

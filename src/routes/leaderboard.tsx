@@ -2,18 +2,18 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { PageShell } from "@/components/PageShell";
-import { ChevronLeft, Trophy, Medal, Loader2, Star, TrendingUp } from "lucide-react";
+import { ChevronLeft, Trophy, Medal, Loader2, Star, TrendingUp, Sparkles, Crown } from "lucide-react";
 
 export const Route = createFileRoute("/leaderboard")({
   component: LeaderboardPage,
 });
 
 const SUBJECTS = [
-  { id: "math", name: "คณิตศาสตร์", color: "text-blue-600", bg: "bg-blue-100" },
-  { id: "science", name: "วิทยาศาสตร์", color: "text-emerald-600", bg: "bg-emerald-100" },
-  { id: "english", name: "ภาษาอังกฤษ", color: "text-rose-600", bg: "bg-rose-100" },
-  { id: "thai", name: "ภาษาไทย", color: "text-amber-600", bg: "bg-amber-100" },
-  { id: "social", name: "สังคมศึกษา", color: "text-purple-600", bg: "bg-purple-100" },
+  { id: "math", name: "คณิตศาสตร์", color: "text-blue-600", activeBg: "bg-blue-600 text-white" },
+  { id: "science", name: "วิทยาศาสตร์", color: "text-emerald-600", activeBg: "bg-emerald-600 text-white" },
+  { id: "english", name: "ภาษาอังกฤษ", color: "text-rose-600", activeBg: "bg-rose-600 text-white" },
+  { id: "thai", name: "ภาษาไทย", color: "text-amber-600", activeBg: "bg-amber-600 text-white" },
+  { id: "social", name: "สังคมศึกษา", color: "text-purple-600", activeBg: "bg-purple-600 text-white" },
 ];
 
 function LeaderboardPage() {
@@ -33,10 +33,9 @@ function LeaderboardPage() {
         setCurrentUserEmail(session.user.email || null);
       }
 
-      // ดึงข้อมูลนักเรียนทั้งหมดมาเพื่อจัดอันดับ
       const { data, error } = await supabase.from("students").select("name, email, scores");
       if (error) throw error;
-      
+
       setStudents(data || []);
     } catch (error) {
       console.error("Error fetching leaderboard:", error);
@@ -48,150 +47,194 @@ function LeaderboardPage() {
   if (isLoading) {
     return (
       <PageShell>
-        <div className="min-h-[60vh] flex flex-col items-center justify-center text-slate-400">
-          <Loader2 className="size-8 animate-spin mb-4 text-primary" />
-          <p>กำลังโหลดข้อมูลกระดานจัดอันดับ...</p>
+        <div className="min-h-[60vh] flex flex-col items-center justify-center text-slate-400 gap-3">
+          <Loader2 className="size-8 animate-spin text-primary" />
+          <p className="text-sm font-semibold">กำลังประมวลผลกระดานจัดอันดับ...</p>
         </div>
       </PageShell>
     );
   }
 
-  // คำนวณและเรียงลำดับคะแนนตามวิชาที่เลือก (ใช้คะแนน % ล่าสุดที่บันทึกไว้)
   const rankedStudents = students
-    .map(s => ({
+    .map((s) => ({
       name: s.name,
       email: s.email,
-      score: s.scores?.[activeSubject] || 0
+      score: s.scores?.[activeSubject] || 0,
     }))
-    // กรองเอาเฉพาะคนที่มีคะแนนมากกว่า 0 (เคยสอบวิชานี้แล้ว)
-    .filter(s => s.score > 0)
+    .filter((s) => s.score > 0)
     .sort((a, b) => b.score - a.score);
 
-  // หาอันดับของตัวเอง
-  const currentUserRankIndex = rankedStudents.findIndex(s => s.email === currentUserEmail);
+  const currentUserRankIndex = rankedStudents.findIndex((s) => s.email === currentUserEmail);
   const currentUserData = currentUserRankIndex !== -1 ? rankedStudents[currentUserRankIndex] : null;
+
+  const top1 = rankedStudents[0];
+  const top2 = rankedStudents[1];
+  const top3 = rankedStudents[2];
+  const otherRanks = rankedStudents.slice(3);
 
   return (
     <PageShell>
-      <nav aria-label="breadcrumb" className="flex items-center gap-1.5 text-sm text-muted-foreground mb-8">
-        <Link to="/" className="flex items-center gap-1 hover:text-primary transition-colors">
-          <ChevronLeft className="size-4" /> กลับหน้าหลัก
-        </Link>
-      </nav>
+      <div className="relative isolate overflow-hidden pb-16">
+        <div className="pointer-events-none absolute -top-24 left-1/2 -z-10 -translate-x-1/2 blur-3xl opacity-50">
+          <div className="h-72 w-[600px] bg-gradient-to-r from-amber-200 via-yellow-300 to-teal-200 rounded-full" />
+        </div>
 
-      <div className="max-w-4xl mx-auto space-y-8">
-        <div className="text-center space-y-3">
-          <div className="inline-flex p-3 sm:p-4 rounded-full bg-amber-100 text-amber-500 mb-2 shadow-sm">
-            <Trophy className="size-10 sm:size-12" />
+        {/* Navigation Breadcrumb */}
+        <nav aria-label="breadcrumb" className="flex items-center gap-1.5 text-sm text-slate-500 mb-6">
+          <Link to="/" className="inline-flex items-center gap-1 hover:text-primary font-medium transition-colors">
+            <ChevronLeft className="size-4" /> กลับหน้าหลัก
+          </Link>
+        </nav>
+
+        {/* Header Title */}
+        <div className="text-center max-w-2xl mx-auto space-y-3 mb-10">
+          <div className="inline-flex p-4 rounded-3xl bg-gradient-to-b from-amber-100 to-amber-200 text-amber-600 shadow-[0_4px_0_0_#d97706] mb-2">
+            <Trophy className="size-10 text-amber-600" />
           </div>
-          <h1 className="text-3xl sm:text-4xl font-extrabold text-slate-800">
-            Hall of Fame
-          </h1>
-          <p className="text-slate-500 max-w-lg mx-auto">
-            กระดานจัดอันดับนักเรียนที่มีคะแนนยอดเยี่ยมในแต่ละรายวิชา ฝึกฝนบ่อยๆ เพื่อขึ้นเป็นที่ 1!
+          <h1 className="text-3xl sm:text-5xl font-black text-slate-900 tracking-tight">Hall of Fame</h1>
+          <p className="text-sm text-slate-500 leading-relaxed">
+            ตารางจัดอันดับนักเรียนที่มีผลคะแนนยอดเยี่ยมสูงสุดในแต่ละวิชา
           </p>
         </div>
 
-        {/* เมนูเลือกวิชา */}
-        <div className="flex flex-wrap items-center justify-center gap-2 sm:gap-3">
-          {SUBJECTS.map((sub) => (
-            <button
-              key={sub.id}
-              onClick={() => setActiveSubject(sub.id)}
-              className={`px-4 sm:px-6 py-2 sm:py-2.5 rounded-xl font-bold text-sm transition-all duration-300 ${
-                activeSubject === sub.id
-                  ? `${sub.bg} ${sub.color} shadow-sm ring-1 ring-${sub.color.replace('text-', '')}/50 scale-105`
-                  : "bg-white text-slate-500 border border-slate-200 hover:bg-slate-50"
-              }`}
-            >
-              {sub.name}
-            </button>
-          ))}
+        {/* Subject Filter Pills */}
+        <div className="flex flex-wrap items-center justify-center gap-2 mb-10">
+          {SUBJECTS.map((sub) => {
+            const active = activeSubject === sub.id;
+            return (
+              <button
+                key={sub.id}
+                onClick={() => setActiveSubject(sub.id)}
+                className={`px-5 py-2.5 rounded-2xl font-bold text-xs sm:text-sm transition-all ${
+                  active
+                    ? `${sub.activeBg} shadow-md scale-105`
+                    : "bg-white/80 backdrop-blur-md text-slate-600 border border-white/80 hover:bg-white"
+                }`}
+              >
+                {sub.name}
+              </button>
+            );
+          })}
         </div>
 
-        {/* กระดานอันดับ */}
-        <div className="bg-white rounded-3xl border shadow-sm overflow-hidden">
-          {/* อันดับของตัวเอง (ถ้ามี) */}
-          {currentUserData && (
-            <div className="bg-slate-800 p-5 text-white flex items-center justify-between sm:px-8">
-              <div className="flex items-center gap-4">
-                <div className="size-10 sm:size-12 rounded-full bg-slate-700 flex items-center justify-center font-black text-lg border border-slate-600">
-                  {currentUserRankIndex + 1}
-                </div>
-                <div>
-                  <p className="text-xs text-slate-400 font-semibold mb-0.5">อันดับของคุณ</p>
-                  <p className="font-bold text-sm sm:text-base">{currentUserData.name}</p>
-                </div>
+        {/* Current User Floating Banner */}
+        {currentUserData && (
+          <div className="max-w-3xl mx-auto mb-8 backdrop-blur-xl bg-slate-900/90 text-white p-5 sm:px-8 rounded-3xl shadow-xl flex items-center justify-between border border-slate-700/50">
+            <div className="flex items-center gap-4">
+              <div className="size-12 rounded-2xl bg-gradient-to-br from-amber-400 to-orange-500 text-slate-900 flex items-center justify-center font-black text-lg shadow-inner">
+                #{currentUserRankIndex + 1}
               </div>
-              <div className="text-right">
-                <p className="text-xl sm:text-2xl font-black text-amber-400">{currentUserData.score}<span className="text-sm font-medium text-slate-400 ml-1">%</span></p>
+              <div>
+                <p className="text-[10px] uppercase font-bold text-amber-400 tracking-wider">อันดับปัจจุบันของคุณ</p>
+                <p className="font-black text-base text-white">{currentUserData.name}</p>
               </div>
             </div>
-          )}
+            <div className="text-right">
+              <span className="text-2xl font-black text-amber-400">{currentUserData.score}</span>
+              <span className="text-xs text-slate-400 ml-1 font-bold">%</span>
+            </div>
+          </div>
+        )}
 
-          <div className="p-4 sm:p-6">
-            {rankedStudents.length > 0 ? (
-              <div className="space-y-3">
-                {rankedStudents.map((student, index) => {
-                  const isTop3 = index < 3;
-                  const isCurrentUser = student.email === currentUserEmail;
-                  
+        {/* 3D Podium for Top 3 */}
+        {rankedStudents.length > 0 ? (
+          <div className="max-w-3xl mx-auto space-y-6">
+            <div className="grid grid-cols-3 gap-3 sm:gap-4 items-end pt-8 pb-4">
+              {/* Rank 2: Silver */}
+              <div className="flex flex-col items-center">
+                {top2 ? (
+                  <>
+                    <div className="size-14 sm:size-16 rounded-2xl bg-gradient-to-b from-slate-200 to-slate-400 text-white flex items-center justify-center font-black text-xl shadow-[0_4px_0_0_#94a3b8] mb-2">
+                      2
+                    </div>
+                    <p className="font-bold text-xs sm:text-sm text-slate-800 text-center line-clamp-1">{top2.name}</p>
+                    <p className="text-xs font-black text-slate-500 mt-0.5">{top2.score}%</p>
+                    <div className="w-full h-24 sm:h-28 rounded-t-3xl bg-gradient-to-t from-slate-200/80 to-slate-100 border border-slate-200 mt-3 shadow-inner" />
+                  </>
+                ) : (
+                  <div className="w-full h-24 rounded-t-3xl bg-slate-100/50" />
+                )}
+              </div>
+
+              {/* Rank 1: Gold Champion */}
+              <div className="flex flex-col items-center -translate-y-2">
+                {top1 ? (
+                  <>
+                    <Crown className="size-8 text-amber-500 fill-amber-400 mb-1 animate-bounce" />
+                    <div className="size-16 sm:size-20 rounded-3xl bg-gradient-to-b from-yellow-300 to-amber-500 text-white flex items-center justify-center font-black text-2xl shadow-[0_5px_0_0_#b45309] mb-2">
+                      1
+                    </div>
+                    <p className="font-black text-sm sm:text-base text-slate-900 text-center line-clamp-1">{top1.name}</p>
+                    <p className="text-sm font-black text-amber-600 mt-0.5">{top1.score}%</p>
+                    <div className="w-full h-32 sm:h-36 rounded-t-3xl bg-gradient-to-t from-amber-200 to-amber-100 border border-amber-300 mt-3 shadow-inner" />
+                  </>
+                ) : null}
+              </div>
+
+              {/* Rank 3: Bronze */}
+              <div className="flex flex-col items-center">
+                {top3 ? (
+                  <>
+                    <div className="size-14 sm:size-16 rounded-2xl bg-gradient-to-b from-orange-300 to-orange-500 text-white flex items-center justify-center font-black text-xl shadow-[0_4px_0_0_#c2410c] mb-2">
+                      3
+                    </div>
+                    <p className="font-bold text-xs sm:text-sm text-slate-800 text-center line-clamp-1">{top3.name}</p>
+                    <p className="text-xs font-black text-orange-600 mt-0.5">{top3.score}%</p>
+                    <div className="w-full h-16 sm:h-20 rounded-t-3xl bg-gradient-to-t from-orange-100 to-orange-50 border border-orange-200 mt-3 shadow-inner" />
+                  </>
+                ) : (
+                  <div className="w-full h-16 rounded-t-3xl bg-slate-100/50" />
+                )}
+              </div>
+            </div>
+
+            {/* Other Ranks Table (Liquid Glass List) */}
+            {otherRanks.length > 0 && (
+              <div className="backdrop-blur-xl bg-white/80 border border-white/90 rounded-3xl p-4 sm:p-6 shadow-[0_10px_35px_rgba(0,0,0,0.04)] space-y-2.5">
+                {otherRanks.map((student, idx) => {
+                  const actualRank = idx + 4;
+                  const isCurrent = student.email === currentUserEmail;
+
                   return (
-                    <div 
-                      key={index} 
+                    <div
+                      key={idx}
                       className={`flex items-center justify-between p-4 rounded-2xl transition-all ${
-                        isCurrentUser ? "bg-primary/10 border-primary/30 border ring-1 ring-primary/20" : "bg-slate-50 hover:bg-slate-100 border border-transparent"
+                        isCurrent
+                          ? "bg-primary/10 border border-primary/30 font-bold"
+                          : "bg-white/70 border border-slate-100 hover:bg-white"
                       }`}
                     >
                       <div className="flex items-center gap-4">
-                        <div className={`size-10 sm:size-12 rounded-full flex items-center justify-center font-black text-lg shadow-sm ${
-                          index === 0 ? "bg-gradient-to-br from-yellow-300 to-amber-500 text-white" :
-                          index === 1 ? "bg-gradient-to-br from-slate-200 to-slate-400 text-white" :
-                          index === 2 ? "bg-gradient-to-br from-orange-300 to-orange-500 text-white" :
-                          "bg-white text-slate-600 border border-slate-200"
-                        }`}>
-                          {index === 0 ? <CrownIcon /> : index + 1}
-                        </div>
+                        <span className="size-9 rounded-xl bg-slate-100 font-bold text-xs text-slate-600 flex items-center justify-center">
+                          {actualRank}
+                        </span>
                         <div>
-                          <p className={`font-bold text-sm sm:text-base flex items-center gap-2 ${isCurrentUser ? "text-primary" : "text-slate-800"}`}>
-                            {student.name}
-                            {isCurrentUser && <span className="text-[10px] bg-primary text-white px-2 py-0.5 rounded-full font-semibold">คุณ</span>}
+                          <p className="font-bold text-sm text-slate-800">
+                            {student.name} {isCurrent && <span className="text-[10px] bg-primary text-white px-2 py-0.5 rounded-full ml-1 font-bold">คุณ</span>}
                           </p>
-                          {isTop3 && <p className="text-xs font-semibold text-amber-600 mt-0.5 flex items-center gap-1"><Star className="size-3 fill-amber-500" /> Top {index + 1}</p>}
                         </div>
                       </div>
-                      <div className="text-right">
-                        <p className={`text-xl sm:text-2xl font-black ${isTop3 ? "text-slate-800" : "text-slate-600"}`}>
-                          {student.score}
-                          <span className="text-sm font-medium text-slate-400 ml-1">%</span>
-                        </p>
-                      </div>
+                      <span className="text-base font-black text-slate-700">{student.score}%</span>
                     </div>
                   );
                 })}
               </div>
-            ) : (
-              <div className="py-16 flex flex-col items-center justify-center text-slate-400">
-                <TrendingUp className="size-12 mb-3 opacity-20" />
-                <p className="font-semibold text-slate-600">ยังไม่มีข้อมูลคะแนนในวิชานี้</p>
-                <p className="text-sm mt-1">เริ่มทำข้อสอบเพื่อเป็นคนแรกในกระดานผู้นำสิ!</p>
-                <Link to="/programs" className="mt-4 px-6 py-2.5 bg-primary text-white rounded-xl font-bold text-sm hover:bg-primary/90 transition shadow-sm">
-                  ไปที่คลังข้อสอบ
-                </Link>
-              </div>
             )}
           </div>
-        </div>
+        ) : (
+          <div className="max-w-md mx-auto py-16 text-center text-slate-400 backdrop-blur-xl bg-white/60 border border-white/80 rounded-3xl p-8 shadow-sm">
+            <TrendingUp className="size-12 mx-auto mb-3 opacity-20" />
+            <p className="font-bold text-slate-700 text-base">ยังไม่มีคะแนนในวิชานี้</p>
+            <p className="text-xs text-slate-500 mt-1">เป็นคนแรกที่ทำข้อสอบเพื่อขึ้นเป็นอันดับที่ 1 ของกระดาน!</p>
+            <Link
+              to="/programs"
+              className="mt-6 inline-block px-6 py-3 bg-primary text-white font-bold text-xs rounded-2xl shadow-[0_4px_0_0_#0f766e] active:translate-y-0.5 active:shadow-none transition"
+            >
+              ไปทำข้อสอบเลย
+            </Link>
+          </div>
+        )}
       </div>
     </PageShell>
-  );
-}
-
-// Custom Crown Icon for 1st Place
-function CrownIcon() {
-  return (
-    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="size-6">
-      <path fillRule="evenodd" d="M10.788 3.21c.448-1.077 1.976-1.077 2.424 0l2.082 5.006 5.404.434c1.164.093 1.636 1.545.749 2.305l-4.117 3.527 1.257 5.273c.271 1.136-.964 2.033-1.96 1.425L12 18.354 7.373 21.18c-.996.608-2.231-.29-1.96-1.425l1.257-5.273-4.117-3.527c-.887-.76-.415-2.212.749-2.305l5.404-.434 2.082-5.005Z" clipRule="evenodd" />
-    </svg>
   );
 }

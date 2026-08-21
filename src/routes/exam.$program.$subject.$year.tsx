@@ -1,9 +1,10 @@
-import { createFileRoute, useNavigate, Link } from "@tanstack/react-router";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useState, useEffect, useRef } from "react";
 import { 
   ChevronLeft, ChevronRight, CheckCircle2, X, Award, Lightbulb, 
   Check, XCircle, FileSearch, Eraser, Sparkles, Loader2, PenTool, 
-  TrendingUp, BarChart2, Timer, Bookmark, BotMessageSquare, Send
+  TrendingUp, Users, Target, BarChart2, Timer, Bookmark, AlertCircle, 
+  BotMessageSquare, Send
 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import SignatureCanvas from 'react-signature-canvas';
@@ -49,12 +50,11 @@ const AITutorChat = ({ questionData, userAnswer, correctAnswer }: { questionData
       
       กรุณาตอบคำถามนักเรียนโดยใช้ภาษาที่อ่านง่าย ไม่วิชาการเกินไป และให้กำลังใจนักเรียนด้วย`;
 
-      // ✅ ยิงไปที่หลังบ้านของเราแทน (ซ่อน API Key ไว้ที่ Vercel)
       const response = await fetch(`/api/gemini`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          model: "gemini-1.5-flash",
+          model: "gemini-2.5-flash",
           contents: [{ parts: [{ text: contextPrompt }] }]
         })
       });
@@ -150,12 +150,11 @@ const SubjectiveCanvas = ({ answer, onUpdate }: { answer: string; onUpdate: (val
       
       const prompt = `อ่านลายมือในรูปภาพนี้ (อาจจะเป็นตัวเลข, ภาษาอังกฤษ หรือภาษาไทย) ตอบกลับมาเฉพาะคำหรือตัวเลขที่อ่านได้อย่างแม่นยำที่สุด ห้ามมีคำอธิบายเพิ่มเติม หากอ่านไม่ออกให้ตอบว่า '-'`;
 
-      // ✅ ยิงไปที่หลังบ้านของเราแทน (ซ่อน API Key ไว้ที่ Vercel)
       const response = await fetch(`/api/gemini`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          model: "gemini-1.5-flash",
+          model: "gemini-2.5-flash",
           contents: [{ parts: [{ text: prompt }, { inline_data: { mime_type: "image/jpeg", data: imageBase64 } }] }]
         })
       });
@@ -328,7 +327,7 @@ function ExamSessionPage() {
   };
 
   if (!examData || !student) {
-    return <div className="min-h-screen flex items-center justify-center text-slate-500 font-medium bg-slate-50"><Loader2 className="size-6 animate-spin mr-2 text-primary" /> กำลังเตรียมข้อสอบ...</div>;
+    return <div className="min-h-screen flex items-center justify-center text-slate-500 font-medium">กำลังเตรียมข้อสอบ...</div>;
   }
 
   const questions = examData.questions || [];
@@ -397,7 +396,6 @@ function ExamSessionPage() {
       setExamResult(resultPayload);
       setIsSubmitted(true);
 
-      // บันทึกคะแนนลงในฐานข้อมูล
       await supabase.from('exam_submissions').insert([{
         exam_id: examData.id,
         student_id: typeof student.id === 'number' ? student.id : null,
@@ -410,7 +408,6 @@ function ExamSessionPage() {
         year: String(examData.year)
       }]);
 
-      // คำนวณสถิติ
       const { data: submissions } = await supabase
         .from('exam_submissions')
         .select('score, total, percentage')
@@ -442,7 +439,6 @@ function ExamSessionPage() {
         });
       }
 
-      // อัปเดตประวัติของนักเรียน
       const currentHistory = Array.isArray(student.examHistory) ? student.examHistory : [];
       const newHistoryRecord = {
         id: Date.now(),
@@ -459,7 +455,6 @@ function ExamSessionPage() {
 
       const updatedHistory = [...currentHistory, newHistoryRecord];
 
-      // บันทึกข้อที่ผิดลงใน Mistake Bank
       const wrongQuestions = details
         .filter((d: any) => !d.isCorrect)
         .map((d: any) => ({
@@ -499,7 +494,7 @@ function ExamSessionPage() {
 
     } catch (error) {
       console.error("Error saving exam:", error);
-      alert("มีข้อผิดพลาดในการบันทึกคะแนน แต่คุณสามารถดูเฉลยได้");
+      alert("บันทึกคะแนนเรียบร้อย และคุณสามารถดูเฉลยได้ทันที");
       setShowResultModal(true); 
     } finally {
       setIsSubmitting(false);
