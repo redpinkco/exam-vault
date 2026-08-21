@@ -15,7 +15,7 @@ function WorksheetPage() {
   const [worksheet, setWorksheet] = useState<any>(null);
   const [currentPage, setCurrentPage] = useState(0);
   
-  // สร้าง Array ของ Ref เพื่อเก็บลายเส้นแยกแต่ละหน้า (กำหนดเป็น any[] เพื่อแก้ปัญหา Type Error)
+  // สร้าง Array ของ Ref เพื่อเก็บลายเส้นแยกแต่ละหน้า
   const sigCanvasRefs = useRef<any[]>([]);
   
   const [isChecking, setIsChecking] = useState(false);
@@ -26,7 +26,7 @@ function WorksheetPage() {
       const { data, error } = await supabase.from('worksheets').select('*').eq('id', id).single();
       if (error || !data) {
         alert("ไม่พบข้อมูลแบบฝึกหัดนี้");
-        navigate({ to: "/" });
+        navigate({ to: "/programs" });
         return;
       }
       setWorksheet(data);
@@ -44,7 +44,6 @@ function WorksheetPage() {
   const handleCheckWithAI = async () => {
     const currentCanvas = sigCanvasRefs.current[currentPage];
     
-    // 💡 ป้องกัน Error บรรทัด 78: เช็คก่อนว่ากระดานมีค่าหรือไม่
     if (!currentCanvas || currentCanvas.isEmpty()) {
       alert("กรุณาเขียนคำตอบลงบนแบบฝึกหัดก่อนส่งตรวจครับ");
       return;
@@ -75,7 +74,7 @@ function WorksheetPage() {
       // วาดรูปชีทลงไปก่อน
       ctx.drawImage(bgImg, 0, 0, mergeCanvas.width, mergeCanvas.height);
 
-      // วาดลายเส้นของเด็กลงไปทับ (TypeScript รู้แล้วว่า currentCanvas ไม่เป็น null)
+      // วาดลายเส้นของเด็กลงไปทับ
       const studentDrawing = currentCanvas.getCanvas();
       ctx.drawImage(studentDrawing, 0, 0, mergeCanvas.width, mergeCanvas.height);
 
@@ -107,15 +106,20 @@ function WorksheetPage() {
     }
   };
 
-  if (!worksheet) return <div className="min-h-screen flex items-center justify-center text-slate-400">กำลังโหลดแบบฝึกหัด...</div>;
+  if (!worksheet) return <div className="min-h-screen bg-slate-900 flex items-center justify-center text-slate-400">กำลังโหลดแบบฝึกหัด...</div>;
 
   return (
     <div className="min-h-screen bg-slate-900 flex flex-col font-sans">
       {/* Header */}
       <header className="bg-slate-800 text-white p-4 flex items-center justify-between shadow-md z-10">
         <div className="flex items-center gap-4">
-          {/* 💡 ป้องกัน Error บรรทัด 116: ใช้ window.history.back() ย้อนกลับชัวร์สุด */}
-          <button onClick={() => window.history.back()} className="p-2 hover:bg-slate-700 rounded-full transition"><ArrowLeft className="size-5" /></button>
+          <button 
+            onClick={() => window.history.back()} 
+            className="p-2 hover:bg-slate-700 rounded-full transition"
+            title="ย้อนกลับ"
+          >
+            <ArrowLeft className="size-5" />
+          </button>
           <div>
             <h1 className="font-bold text-lg">{worksheet.title}</h1>
             <p className="text-xs text-slate-400">หน้าที่ {currentPage + 1} จาก {worksheet.pages.length}</p>
@@ -165,13 +169,13 @@ function WorksheetPage() {
             <button 
               onClick={() => { setCurrentPage(prev => Math.max(0, prev - 1)); setAiFeedback(""); }}
               disabled={currentPage === 0}
-              className="p-2 bg-slate-700 rounded-lg text-white disabled:opacity-30"
+              className="p-2 bg-slate-700 rounded-lg text-white disabled:opacity-30 transition-colors"
             ><ChevronLeft className="size-5"/></button>
             <span className="text-white font-bold text-sm">เปลี่ยนหน้า</span>
             <button 
               onClick={() => { setCurrentPage(prev => Math.min(worksheet.pages.length - 1, prev + 1)); setAiFeedback(""); }}
               disabled={currentPage === worksheet.pages.length - 1}
-              className="p-2 bg-slate-700 rounded-lg text-white disabled:opacity-30"
+              className="p-2 bg-slate-700 rounded-lg text-white disabled:opacity-30 transition-colors"
             ><ChevronRight className="size-5"/></button>
           </div>
 

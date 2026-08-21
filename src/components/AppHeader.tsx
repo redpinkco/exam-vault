@@ -1,16 +1,13 @@
 import { Link, useNavigate } from "@tanstack/react-router";
 import { useEffect, useState, useRef } from "react";
 import logo from "@/assets/logo.png";
-import { UserCircle, LogOut, BarChart3, History, ChevronDown, User } from "lucide-react";
+import { UserCircle, LogOut, BarChart3, History, ChevronDown, User, Trophy } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 
 export function AppHeader() {
   const navigate = useNavigate();
   const [user, setUser] = useState<any>(null);
-  
-  // เพิ่ม State ตรวจสอบการโหลด เพื่อไม่ให้ปุ่มแวบ
   const [isLoading, setIsLoading] = useState(true); 
-  
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
@@ -18,7 +15,7 @@ export function AppHeader() {
     const fetchUser = async () => {
       const { data: { session } } = await supabase.auth.getSession();
       setUser(session?.user ?? null);
-      setIsLoading(false); // โหลดเสร็จแล้ว ปิดตัวโหลด
+      setIsLoading(false);
     };
     fetchUser();
 
@@ -49,7 +46,7 @@ export function AppHeader() {
     <header className="sticky top-0 z-40 border-b border-border/60 bg-card/85 backdrop-blur-md">
       <div className="mx-auto flex h-16 w-full max-w-6xl items-center justify-between px-4 sm:px-6">
         
-        {/* ส่วนโลโก้ด้านซ้าย */}
+        {/* โลโก้ด้านซ้าย */}
         <Link to="/" className="flex items-center gap-3">
           <span className="flex size-10 items-center justify-center rounded-xl bg-secondary p-1.5">
             <img src={logo} alt="โลโก้คลังสอบ" width={512} height={512} className="size-full object-contain" />
@@ -60,17 +57,24 @@ export function AppHeader() {
           </span>
         </Link>
 
-        {/* ส่วนปุ่มเมนูด้านขวา */}
+        {/* เมนูด้านขวา */}
         <div className="flex items-center gap-3">
+          {/* ปุ่มทางลัดไปหน้า Leaderboard */}
+          <Link
+            to={"/leaderboard" as any}
+            className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-sm font-bold text-amber-700 bg-amber-50 hover:bg-amber-100 border border-amber-200 transition-colors shadow-sm"
+          >
+            <Trophy className="size-4 text-amber-500 fill-amber-500" />
+            <span className="hidden sm:inline">ตารางจัดอันดับ</span>
+          </Link>
+
           {isLoading ? (
-            // === ระหว่างโหลด (0.1 วินาทีแรก) โชว์กล่องเทาๆ ป้องกันปุ่มแวบ ===
             <div className="h-10 w-32 animate-pulse rounded-lg bg-slate-100"></div>
           ) : user ? (
-            // === กรณี: ล็อกอินแล้ว (แสดง Dropdown) ===
             <div className="relative" ref={dropdownRef}>
               <button 
                 onClick={() => setIsDropdownOpen(!isDropdownOpen)}
-                className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 transition-colors shadow-sm"
+                className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 transition-colors shadow-sm"
               >
                 <div className="flex size-6 items-center justify-center rounded-full bg-primary/10 text-primary">
                   <User className="size-4" />
@@ -81,7 +85,7 @@ export function AppHeader() {
                 <ChevronDown className={`size-4 text-slate-400 transition-transform ${isDropdownOpen ? "rotate-180" : ""}`} />
               </button>
 
-              {/* เมนู Dropdown */}
+              {/* Dropdown เมนู */}
               {isDropdownOpen && (
                 <div className="absolute right-0 mt-2 w-56 origin-top-right rounded-2xl border border-slate-100 bg-white p-2 shadow-lg ring-1 ring-black/5 animate-in fade-in zoom-in-95 duration-200">
                   <div className="px-3 py-2 mb-2 border-b border-slate-100">
@@ -90,7 +94,15 @@ export function AppHeader() {
                   </div>
                   
                   <div className="flex flex-col gap-1">
-                    {/* 💡 แก้ลิงก์ไปหน้า /dashboard */}
+                    <Link 
+                      to={"/leaderboard" as any} 
+                      onClick={() => setIsDropdownOpen(false)}
+                      className="flex items-center gap-3 rounded-xl px-3 py-2 text-sm font-medium text-amber-800 hover:bg-amber-50 transition-colors"
+                    >
+                      <Trophy className="size-4 text-amber-500 fill-amber-500" />
+                      ตารางจัดอันดับ (Top Scores)
+                    </Link>
+
                     <Link 
                       to="/dashboard" 
                       onClick={() => setIsDropdownOpen(false)}
@@ -108,16 +120,6 @@ export function AppHeader() {
                       <History className="size-4" />
                       ประวัติการทำข้อสอบ
                     </Link>
-
-                    {/* ปุ่มข้อมูลส่วนตัว ให้ชี้ไปหน้าแดชบอร์ดเช่นกัน หรือปรับเปลี่ยนได้ในอนาคต */}
-                    <Link 
-                      to="/dashboard" 
-                      onClick={() => setIsDropdownOpen(false)}
-                      className="flex items-center gap-3 rounded-xl px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50 hover:text-primary transition-colors"
-                    >
-                      <UserCircle className="size-4" />
-                      ข้อมูลส่วนตัว
-                    </Link>
                   </div>
 
                   <div className="mt-2 pt-2 border-t border-slate-100">
@@ -133,7 +135,6 @@ export function AppHeader() {
               )}
             </div>
           ) : (
-            // === กรณี: เผื่ออนาคตเอาไปใช้หน้า Landing Page สาธารณะ ===
             <Link 
               to="/login" 
               className="flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-white hover:bg-primary/90 transition-colors shadow-sm"

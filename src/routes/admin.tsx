@@ -5,7 +5,7 @@ import {
   Trash2, UploadCloud, FileText, X, BarChart3, Mail, Phone, Lock, Save, History, 
   Image as ImageIcon, Sparkles, ChevronLeft, Filter, Search, Unlock, LogOut,
   GraduationCap, Video, CheckCircle2, Plus, ArrowUpRight, AlignLeft, CheckSquare,
-  HelpCircle, Lightbulb, ShieldCheck, AlertTriangle, FilePenLine, Loader2
+  HelpCircle, Lightbulb, ShieldCheck, AlertTriangle, FilePenLine, Loader2, RefreshCw
 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 
@@ -53,24 +53,28 @@ function AdminDashboard() {
   const [exams, setExams] = useState<any[]>([]);
   const [editingExamId, setEditingExamId] = useState<number | null>(null);
   const [examModalMode, setExamModalMode] = useState<"none" | "select" | "exam_info" | "ai" | "manual" | "ai_result">("none");
-  const [newExamInfo, setNewExamInfo] = useState<{ title: string; grade: string[]; program: string[]; subject: string; year: string }>({ 
-    title: "", grade: ["ป.6"], program: ["ISM"], subject: "คณิตศาสตร์", year: "2566" 
+  const [newExamInfo, setNewExamInfo] = useState<{ 
+    title: string; grade: string[]; program: string[]; subject: string; year: string; is_timed: boolean; duration_minutes: number;
+  }>({ 
+    title: "", grade: ["ป.6"], program: ["ISM"], subject: "คณิตศาสตร์", year: "2566", is_timed: true, duration_minutes: 90 
   });
+  
   const [manualQuestions, setManualQuestions] = useState<QuestionItem[]>([
     { id: 1, type: "choice", question: "", image_url: "", options: ["", "", "", ""], correct_index: 0, subjective_answers: [""], explanation: "" }
   ]);
+  
+  const [generatingExpId, setGeneratingExpId] = useState<number | null>(null);
 
   const [previewImages, setPreviewImages] = useState<string[]>([]);
   const [isAiProcessing, setIsAiProcessing] = useState(false);
   const [aiResult, setAiResult] = useState<QuestionItem[] | null>(null);
 
-  // 💡 States สำหรับ Worksheet
   const [worksheets, setWorksheets] = useState<any[]>([]);
   const [showWorksheetModal, setShowWorksheetModal] = useState(false);
   const [worksheetFormData, setWorksheetFormData] = useState({
     title: "", grade: ["ป.6"], program: ["ISM"], subject: "คณิตศาสตร์", pages: [] as string[]
   });
-  const [isUploading, setIsUploading] = useState(false); // 💡 ป้องกันผู้ใช้กดรัวๆ ตอนกำลังอัปโหลด
+  const [isUploading, setIsUploading] = useState(false);
 
   const [filterGrade, setFilterGrade] = useState("ป.6");
   const [filterProgram, setFilterProgram] = useState("ISM");
@@ -106,23 +110,24 @@ function AdminDashboard() {
     if (!error && data) setWorksheets(data);
   };
 
-  // --- 💡 ฟังก์ชันช่วย: อัปโหลดรูปลง Storage ---
   const uploadImageToStorage = async (file: File, folderName: string): Promise<string> => {
     const fileExt = file.name.split('.').pop();
     const fileName = `${folderName}/${Math.random().toString(36).substring(2, 15)}_${Date.now()}.${fileExt}`;
     
-    const { data, error } = await supabase.storage
-      .from('exam-vault-images') // ชื่อ Bucket ที่ให้คุณไปสร้าง
-      .upload(fileName, file, { cacheControl: '3600', upsert: false });
+    const { error } = await supabase.storage
+      .from('exam-vault-images')
+      .upload(fileName, file, { 
+        cacheControl: '3600', 
+        upsert: false,
+        contentType: file.type || 'image/jpeg'
+      });
 
     if (error) throw error;
     
-    // ดึง URL ที่เปิดดูได้แบบ Public
     const { data: { publicUrl } } = supabase.storage.from('exam-vault-images').getPublicUrl(fileName);
     return publicUrl;
   };
 
-  // --- Users Handlers ---
   const handleOpenAddStudent = () => { 
     setFormData({ id: 0, name: "", email: "", password: "", phone: "", permissions: defaultPermissions }); 
     setIsEditing(false); 
@@ -167,7 +172,7 @@ function AdminDashboard() {
       }
       const { error } = await supabase.from('students').insert([{
         name: formData.name, email: formData.email, phone: formData.phone,
-        permissions: formData.permissions, scores: { math: 0, english: 0 }, examHistory: []
+        permissions: formData.permissions, scores: { math: 0, english: 0, science: 0, thai: 0, social: 0 }, examHistory: [], mistakeBank: []
       }]);
       if (error) alert("เกิดข้อผิดพลาด: " + error.message);
       else { alert("สร้างบัญชีนักเรียนสำเร็จ!"); fetchStudents(); }
@@ -182,7 +187,52 @@ function AdminDashboard() {
     } 
   };
 
-  // --- Lessons Handlers ---
+  const handleDeleteStudentHistory = async (studentToUpdate: any, historyId: number, examId: number) => {
+    if (!confirm("⚠️ ต้องการลบประวัติการสอบชุดนี้ใช่หรือไม่?\n\n* ข้อมูลในคลังข้อผิดจะถูกลบด้วย\n* ข้อมูลคะแนนในกระดานจัดอันดับ (Leaderboard) จะถูกล้างออกเพื่อความเป็นธรรม")) return;
+
+    const newHistory = (studentToUpdate.examHistory || []).filter((h: any) => h.id !== historyId);
+    const newMistakes = (studentToUpdate.mistakeBank || []).filter((m: any) => m.exam_id !== examId);
+
+    const { error } = await supabase.from('students').update({
+      examHistory: newHistory,
+      mistakeBank: newMistakes
+    }).eq('id', studentToUpdate.id);
+
+    if (error) return alert("เกิดข้อผิดพลาด: " + error.message);
+
+    await supabase.from('exam_submissions')
+      .delete()
+      .eq('student_id', studentToUpdate.id)
+      .eq('exam_id', examId);
+
+    alert("ลบประวัติการสอบเรียบร้อย");
+    fetchStudents();
+    setSelectedStudent({ ...studentToUpdate, examHistory: newHistory, mistakeBank: newMistakes });
+  };
+
+  const handleResetStudentData = async (studentToUpdate: any) => {
+    if (!confirm("🚨 คำเตือน: คุณต้องการรีเซ็ตผลสอบทั้งหมดของนักเรียนคนนี้ใช่หรือไม่?\n\n* ประวัติการสอบและคลังข้อผิดจะหายไปทั้งหมด\n* บัญชีและสิทธิ์การเข้าถึงจะยังคงอยู่ปกติ\n* การกระทำนี้ไม่สามารถย้อนกลับได้!")) return;
+
+    const { error } = await supabase.from('students').update({
+      examHistory: [],
+      mistakeBank: [],
+      scores: { math: 0, english: 0, science: 0, thai: 0, social: 0 }
+    }).eq('id', studentToUpdate.id);
+
+    if (error) return alert("เกิดข้อผิดพลาด: " + error.message);
+
+    await supabase.from('exam_submissions').delete().eq('student_id', studentToUpdate.id);
+
+    alert("รีเซ็ตข้อมูลนักเรียนเป็นค่าเริ่มต้นเรียบร้อยแล้ว");
+    fetchStudents();
+    setSelectedStudent({ 
+      ...studentToUpdate, 
+      examHistory: [], 
+      mistakeBank: [], 
+      scores: { math: 0, english: 0, science: 0, thai: 0, social: 0 } 
+    });
+  };
+
   const handleSaveLesson = async (e: React.FormEvent) => {
     e.preventDefault();
     if (lessonFormData.grade.length === 0) return alert("กรุณาเลือกระดับชั้นอย่างน้อย 1 รายการ");
@@ -217,7 +267,6 @@ function AdminDashboard() {
     }
   };
 
-  // --- 💡 Worksheet Handlers (อัปเดต Storage) ---
   const handleUploadWorksheetImages = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0) {
       setIsUploading(true);
@@ -273,7 +322,6 @@ function AdminDashboard() {
     }
   };
 
-  // --- Edit Existing Exam Handler ---
   const handleOpenEditExam = (exam: any) => {
     setEditingExamId(exam.id);
     
@@ -285,7 +333,9 @@ function AdminDashboard() {
       grade: safeGrades.length > 0 ? safeGrades : ["ป.6"],
       program: safePrograms.length > 0 ? safePrograms : ["ISM"],
       subject: exam.subject,
-      year: exam.year || "2566"
+      year: exam.year || "2566",
+      is_timed: exam.is_timed !== false,
+      duration_minutes: exam.duration_minutes || 90
     });
 
     const parsedQuestions: QuestionItem[] = (Array.isArray(exam.questions) ? exam.questions : []).map((q: any, idx: number) => ({
@@ -305,7 +355,6 @@ function AdminDashboard() {
     setExamModalMode("manual");
   };
 
-  // --- Manual Exam Question Helpers ---
   const addManualQuestion = () => {
     setManualQuestions(prev => [
       ...prev,
@@ -335,7 +384,6 @@ function AdminDashboard() {
   const updateQuestionText = (index: number, text: string) => setManualQuestions(prev => prev.map((q, i) => i === index ? { ...q, question: text } : q));
   const updateQuestionExplanation = (index: number, text: string) => setManualQuestions(prev => prev.map((q, i) => i === index ? { ...q, explanation: text } : q));
   
-  // --- 💡 อัปเดตอัปโหลดภาพประกอบข้อสอบลง Storage ---
   const updateQuestionImage = async (index: number, e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
       setIsUploading(true);
@@ -426,17 +474,6 @@ function AdminDashboard() {
     }));
   };
 
-  // --- AI OCR Processing ---
-  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files) {
-      const filesArray = Array.from(e.target.files);
-      const urls = filesArray.map(file => URL.createObjectURL(file));
-      setPreviewImages(prev => [...prev, ...urls]); 
-    }
-  };
-
-  const removeImage = (indexToRemove: number) => setPreviewImages(prev => prev.filter((_, index) => index !== indexToRemove));
-
   const urlToBase64 = async (url: string): Promise<string> => {
     const response = await fetch(url);
     const blob = await response.blob();
@@ -452,12 +489,105 @@ function AdminDashboard() {
     });
   };
 
+  // 💡 ฟังก์ชันให้ AI ช่วยเขียนเฉลย (ฝัง API Key ที่คุณสร้างให้แล้ว)
+  const handleGenerateExplanation = async (qIndex: number) => {
+    const q = manualQuestions[qIndex];
+    if (!q) return; 
+    
+    if (!q.question && (!q.image_url || q.image_url === "NEEDS_IMAGE")) {
+      return alert("กรุณาพิมพ์โจทย์คำถามหรืออัปโหลดรูปภาพก่อนครับ เพื่อให้ AI รู้ว่าต้องเฉลยอะไร");
+    }
+
+    setGeneratingExpId(qIndex);
+    try {
+      // ✅ ใช้ API Key จากในรูปภาพของคุณเลยครับ
+      const apiKey = "AQ.Ab8RN6Jg8U1H7UQ9oobaTQZbuD1BfGtAz8hbr7U1p0HGCPms3w";
+
+      let promptText = "";
+      const questionText = q.question ? q.question : "วิเคราะห์และแก้โจทย์ปัญหาจากรูปภาพประกอบ";
+
+      if (q.type === "choice") {
+        const correctAns = q.options[q.correct_index || 0];
+        promptText = `ในฐานะครูผู้เชี่ยวชาญ จงเขียนอธิบายเฉลยและวิธีทำอย่างละเอียดสำหรับโจทย์ข้อนี้\nโจทย์: ${questionText}\nตัวเลือก: ${q.options.join(", ")}\nคำตอบที่ถูกต้องคือ: ${correctAns}\nอธิบายทีละขั้นตอนให้เด็กเข้าใจง่าย ไม่ต้องเกริ่นนำ ให้พิมพ์เนื้อหาคำอธิบายได้เลย`;
+      } else {
+        const correctAns = (q.subjective_answers || []).join(", ");
+        promptText = `ในฐานะครูผู้เชี่ยวชาญ จงเขียนอธิบายเฉลยและวิธีทำอย่างละเอียดสำหรับโจทย์ข้อนี้\nโจทย์: ${questionText}\nคำตอบที่ถูกต้องคือ: ${correctAns}\nอธิบายทีละขั้นตอนให้เด็กเข้าใจง่าย ไม่ต้องเกริ่นนำ ให้พิมพ์เนื้อหาคำอธิบายได้เลย`;
+      }
+
+      const requestParts: any[] = [{ text: promptText }];
+
+      if (q.image_url && q.image_url !== "NEEDS_IMAGE") {
+        try {
+          const base64Data = await urlToBase64(q.image_url);
+          requestParts.push({
+            inline_data: { mime_type: "image/jpeg", data: base64Data }
+          });
+        } catch (imgErr) {
+          console.error("AI Image Load Error:", imgErr);
+          throw new Error("ระบบดึงรูปภาพล้มเหลว (ตรวจสอบการตั้งค่า CORS ของ Supabase Storage)");
+        }
+      }
+
+      const requestBody = JSON.stringify({ contents: [{ parts: requestParts }] });
+
+      // ใช้ Fallback รุ่นต่างๆ
+      const candidateModels = ["gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-3.5-flash"];
+      let parsedText = "";
+      let lastErrorMessage = "";
+
+      for (const model of candidateModels) {
+        try {
+          const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "x-goog-api-key": apiKey },
+            body: requestBody
+          });
+
+          const data = await response.json();
+          
+          if (response.ok && data.candidates?.[0]?.content?.parts?.[0]?.text) {
+            parsedText = data.candidates[0].content.parts[0].text.trim();
+            break; 
+          } else {
+            lastErrorMessage = data.error?.message || `Error status ${response.status}`;
+          }
+        } catch (err: any) { 
+          lastErrorMessage = err.message; 
+        }
+      }
+
+      if (parsedText) {
+        updateQuestionExplanation(qIndex, parsedText);
+      } else {
+        throw new Error(lastErrorMessage || "ไม่สามารถเชื่อมต่อกับ Google AI ได้ กรุณาลองใหม่อีกครั้ง");
+      }
+
+    } catch (error: any) {
+      console.error("AI Error:", error);
+      alert(`ขัดข้อง: ${error.message}`);
+    } finally {
+      setGeneratingExpId(null);
+    }
+  };
+
+  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files) {
+      const filesArray = Array.from(e.target.files);
+      const urls = filesArray.map(file => URL.createObjectURL(file));
+      setPreviewImages(prev => [...prev, ...urls]); 
+    }
+  };
+
+  const removeImage = (indexToRemove: number) => setPreviewImages(prev => prev.filter((_, index) => index !== indexToRemove));
+
+  // 💡 อัปเดตระบบสแกนข้อสอบ (ฝัง API Key ให้เรียบร้อย)
   const processImageWithAI = async () => {
     if (previewImages.length === 0) return;
     setIsAiProcessing(true);
     setAiResult(null);
 
-    const apiKey = "AQ.Ab8RN6LyaWE8FG3kCDnfyGsKsiDEoSVaTT3m0TMnClGY5-Vyow";
+    // ✅ ใช้ API Key จากในรูปภาพของคุณเลยครับ
+    const apiKey = "AQ.Ab8RN6Jg8U1H7UQ9oobaTQZbuD1BfGtAz8hbr7U1p0HGCPms3w";
 
     try {
       const imageParts = await Promise.all(
@@ -467,7 +597,6 @@ function AdminDashboard() {
         })
       );
 
-      // 💡 อัปเดตคำสั่ง (Prompt) ชี้เป้า "NEEDS_IMAGE"
       const promptText = `วิเคราะห์รูปภาพข้อสอบเหล่านี้ (เรียงตามลำดับหน้า) แล้วแปลงข้อมูลเป็นรูปแบบ JSON 
 โดยโครงสร้าง JSON จะต้องเป็น Array ของ Object แต่ละ Object คือ 1 ข้อคำถาม ประกอบด้วยฟิลด์ดังนี้:
 { 
@@ -488,44 +617,36 @@ function AdminDashboard() {
 
       const requestBody = JSON.stringify({ contents: [{ parts: [{ text: promptText }, ...imageParts] }] });
 
-      const candidateModels = ["gemini-3.6-flash", "gemini-3.6-flash-lite", "gemini-3.6-pro"];
+      const candidateModels = ["gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-3.5-flash"];
       let parsedJsonResult: any = null;
       let lastErrorMessage = "";
 
       for (const model of candidateModels) {
-        for (let attempt = 1; attempt <= 2; attempt++) {
-          try {
-            const response = await fetch(
-              `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,
-              {
-                method: "POST",
-                headers: { "Content-Type": "application/json", "x-goog-api-key": apiKey },
-                body: requestBody,
-              }
-            );
+        try {
+          const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "x-goog-api-key": apiKey },
+            body: requestBody
+          });
 
-            const data = await response.json();
-            if (response.ok && data.candidates?.[0]?.content?.parts?.[0]?.text) {
-              const rawText = data.candidates[0].content.parts[0].text;
-              const cleanedText = rawText.replace(/```json|```/g, "").trim();
-              parsedJsonResult = JSON.parse(cleanedText);
-              break;
-            } else {
-              lastErrorMessage = data.error?.message || `Error status ${response.status}`;
-              if (response.status === 503 || response.status === 429 || lastErrorMessage.includes("high demand")) {
-                await new Promise((res) => setTimeout(res, 1000));
-              } else {
-                break;
-              }
-            }
-          } catch (err: any) { lastErrorMessage = err.message; }
+          const data = await response.json();
+          
+          if (response.ok && data.candidates?.[0]?.content?.parts?.[0]?.text) {
+            const rawText = data.candidates[0].content.parts[0].text;
+            const cleanedText = rawText.replace(/```json|```/g, "").trim();
+            parsedJsonResult = JSON.parse(cleanedText);
+            break;
+          } else {
+            lastErrorMessage = data.error?.message || `Error status ${response.status}`;
+          }
+        } catch (err: any) { 
+          lastErrorMessage = err.message; 
         }
         if (parsedJsonResult) break;
       }
 
       if (parsedJsonResult) {
         const formatted: QuestionItem[] = (Array.isArray(parsedJsonResult) ? parsedJsonResult : [parsedJsonResult]).map((item: any, idx: number) => {
-          
           const isNeedsImage = item.image_url === "NEEDS_IMAGE" || (item.question || "").includes("จากรูป");
 
           return {
@@ -545,12 +666,12 @@ function AdminDashboard() {
         setAiResult(formatted);
         setExamModalMode("ai_result");
       } else {
-        throw new Error(lastErrorMessage || "ไม่สามารถประมวลผล AI ได้ในขณะนี้");
+        throw new Error(lastErrorMessage || "ไม่สามารถเชื่อมต่อกับ Google AI ได้ในขณะนี้");
       }
 
     } catch (error: any) {
       console.error("AI Error:", error);
-      alert("AI ขัดข้อง: " + error.message);
+      alert(`ขัดข้อง: ${error.message}`);
     } finally {
       setIsAiProcessing(false);
     }
@@ -561,12 +682,13 @@ function AdminDashboard() {
     if (newExamInfo.grade.length === 0) return alert("กรุณาเลือกระดับชั้นอย่างน้อย 1 รายการ");
     if (newExamInfo.program.length === 0) return alert("กรุณาเลือกแผนการเรียนอย่างน้อย 1 รายการ");
 
-    const missingImages = questionsToSave.some(q => q.image_url === "NEEDS_IMAGE");
+    let finalQuestions = [...questionsToSave];
+    const missingImages = finalQuestions.some(q => q.image_url === "NEEDS_IMAGE");
     if (missingImages) {
       const confirmSave = confirm("มีบางข้อที่จำเป็นต้องใช้รูปภาพประกอบ แต่คุณยังไม่ได้อัปโหลดรูปให้ (แถบสีแดง)\nคุณต้องการบันทึกข้อสอบโดยไม่มีรูปภาพใช่หรือไม่?");
       if (!confirmSave) return; 
       
-      questionsToSave = questionsToSave.map(q => ({
+      finalQuestions = finalQuestions.map(q => ({
         ...q,
         image_url: q.image_url === "NEEDS_IMAGE" ? "" : (q.image_url || "")
       }));
@@ -578,8 +700,10 @@ function AdminDashboard() {
       program: newExamInfo.program.join(", "),
       subject: newExamInfo.subject,
       year: newExamInfo.year,
-      questions: questionsToSave,
-      total_questions: questionsToSave.length,
+      is_timed: newExamInfo.is_timed,
+      duration_minutes: newExamInfo.duration_minutes,
+      questions: finalQuestions,
+      total_questions: finalQuestions.length,
       status: "published"
     };
 
@@ -618,40 +742,36 @@ function AdminDashboard() {
     return active.length > 0 ? active.join(", ") : "ไม่มีสิทธิ์";
   };
 
+  const matchFilterSubject = (itemSubject: string, filterSub: string) => {
+    if (filterSub === "ทั้งหมด") return true;
+    if (!itemSubject) return false;
+    const cleanItem = itemSubject.trim().toLowerCase();
+    const cleanFilter = filterSub.trim().toLowerCase();
+    return cleanItem.includes(cleanFilter) || cleanFilter.includes(cleanItem);
+  };
+
   const filteredExams = exams.filter(exam => {
     const examGrades = safeGetArray(exam.grade);
     const examPrograms = safeGetArray(exam.program);
-    
-    const matchGrade = examGrades.includes(filterGrade);
-    const matchProgram = examPrograms.includes(filterProgram);
-    const matchSubject = filterSubject === "ทั้งหมด" || exam.subject === filterSubject;
-    return matchGrade && matchProgram && matchSubject;
+    return examGrades.includes(filterGrade) && examPrograms.includes(filterProgram) && matchFilterSubject(exam.subject, filterSubject);
   });
 
   const filteredLessons = lessons.filter(l => {
     const lessonGrades = safeGetArray(l.grade);
     const lessonPrograms = safeGetArray(l.program);
-    
-    const matchGrade = lessonGrades.includes(filterGrade);
-    const matchProgram = lessonPrograms.includes(filterProgram);
-    const matchSubject = filterSubject === "ทั้งหมด" || l.subject === filterSubject;
-    return matchGrade && matchProgram && matchSubject;
+    return lessonGrades.includes(filterGrade) && lessonPrograms.includes(filterProgram) && matchFilterSubject(l.subject, filterSubject);
   });
 
   const filteredWorksheets = worksheets.filter(ws => {
     const wsGrades = safeGetArray(ws.grade);
     const wsPrograms = safeGetArray(ws.program);
-    const matchGrade = wsGrades.includes(filterGrade);
-    const matchProgram = wsPrograms.includes(filterProgram);
-    const matchSubject = filterSubject === "ทั้งหมด" || ws.subject === filterSubject;
-    return matchGrade && matchProgram && matchSubject;
+    return wsGrades.includes(filterGrade) && wsPrograms.includes(filterProgram) && matchFilterSubject(ws.subject, filterSubject);
   });
 
   const choiceLabels = ["ก.", "ข.", "ค.", "ง.", "จ."];
 
   return (
     <div className="flex min-h-screen w-full bg-slate-50 text-slate-900 font-sans">
-      {/* Sidebar */}
       <aside className="hidden w-64 flex-col border-r bg-white p-6 md:flex shadow-sm">
         <div className="flex-1">
           <h2 className="mb-8 text-2xl font-bold text-primary flex items-center gap-2">
@@ -673,7 +793,6 @@ function AdminDashboard() {
         </div>
       </aside>
 
-      {/* Main Content */}
       <main className="flex-1 p-6 md:p-10 w-full overflow-x-hidden relative h-screen overflow-y-auto">
         <div className="mb-8 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <h1 className="text-3xl font-bold text-slate-800">
@@ -688,7 +807,7 @@ function AdminDashboard() {
             <button 
               onClick={() => { 
                 setEditingExamId(null);
-                setNewExamInfo({ title: "", grade: [filterGrade], program: [filterProgram], subject: filterSubject === "ทั้งหมด" ? "คณิตศาสตร์" : filterSubject, year: "2566" });
+                setNewExamInfo({ title: "", grade: [filterGrade], program: [filterProgram], subject: filterSubject === "ทั้งหมด" ? "คณิตศาสตร์" : filterSubject, year: "2566", is_timed: true, duration_minutes: 90 });
                 setExamModalMode("exam_info"); 
                 setPreviewImages([]); 
                 setManualQuestions([{ id: 1, type: "choice", question: "", image_url: "", options: ["", "", "", ""], correct_index: 0, subjective_answers: [""], explanation: "" }]);
@@ -721,7 +840,6 @@ function AdminDashboard() {
           )}
         </div>
 
-        {/* --- TAB: DASHBOARD --- */}
         {activeTab === "dashboard" && (
           <div className="animate-in fade-in slide-in-from-bottom-2 duration-300">
             <div className="mb-10 grid grid-cols-1 gap-6 sm:grid-cols-3">
@@ -732,7 +850,6 @@ function AdminDashboard() {
           </div>
         )}
 
-        {/* --- TAB: LESSONS --- */}
         {activeTab === "lessons" && (
           <div className="animate-in fade-in slide-in-from-bottom-2 duration-300">
             <div className="bg-white p-6 rounded-2xl border shadow-sm mb-6 space-y-4">
@@ -800,7 +917,6 @@ function AdminDashboard() {
           </div>
         )}
 
-        {/* --- TAB: EXAMS --- */}
         {activeTab === "exams" && (
           <div className="animate-in fade-in slide-in-from-bottom-2 duration-300">
             <div className="bg-white p-6 rounded-2xl border shadow-sm mb-6 space-y-4">
@@ -827,7 +943,7 @@ function AdminDashboard() {
               <div className="overflow-x-auto">
                 <table className="w-full text-left text-sm">
                   <thead className="border-b text-slate-500 bg-white">
-                    <tr><th className="p-4 font-medium">ชื่อชุดข้อสอบ</th><th className="p-4 font-medium">รายวิชา</th><th className="p-4 font-medium">ปีการศึกษา</th><th className="p-4 font-medium text-center">จำนวนข้อ</th><th className="p-4 font-medium">สถานะ</th><th className="p-4 font-medium">จัดการ</th></tr>
+                    <tr><th className="p-4 font-medium">ชื่อชุดข้อสอบ</th><th className="p-4 font-medium">รายวิชา</th><th className="p-4 font-medium">ปีการศึกษา</th><th className="p-4 font-medium text-center">เวลาสอบ</th><th className="p-4 font-medium text-center">จำนวนข้อ</th><th className="p-4 font-medium">สถานะ</th><th className="p-4 font-medium">จัดการ</th></tr>
                   </thead>
                   <tbody className="divide-y">
                     {filteredExams.length > 0 ? (
@@ -842,6 +958,7 @@ function AdminDashboard() {
                           </td>
                           <td className="p-4 text-slate-600">{exam.subject}</td>
                           <td className="p-4 text-slate-600">{exam.year}</td>
+                          <td className="p-4 text-slate-600 text-center font-medium">{exam.is_timed === false ? "-" : `${exam.duration_minutes || 90} นาที`}</td>
                           <td className="p-4 text-slate-600 text-center font-medium bg-slate-50/50">{exam.total_questions}</td>
                           <td className="p-4"><span className={`inline-flex px-2.5 py-1 rounded-full text-xs font-semibold border ${exam.status === 'published' ? 'bg-green-50 text-green-700 border-green-200' : 'bg-slate-100 text-slate-600 border-slate-200'}`}>{exam.status === 'published' ? 'พร้อมใช้งาน' : 'ฉบับร่าง'}</span></td>
                           <td className="p-4">
@@ -853,7 +970,7 @@ function AdminDashboard() {
                         </tr>
                       ))
                     ) : (
-                      <tr><td colSpan={6} className="p-12 text-center text-slate-400"><BookOpen className="size-10 mx-auto mb-3 opacity-25" /><p>ยังไม่มีข้อมูลข้อสอบในหมวดหมู่นี้</p></td></tr>
+                      <tr><td colSpan={7} className="p-12 text-center text-slate-400"><BookOpen className="size-10 mx-auto mb-3 opacity-25" /><p>ยังไม่มีข้อมูลข้อสอบในหมวดหมู่นี้</p></td></tr>
                     )}
                   </tbody>
                 </table>
@@ -862,7 +979,6 @@ function AdminDashboard() {
           </div>
         )}
 
-        {/* --- TAB: WORKSHEETS --- */}
         {activeTab === "worksheets" && (
           <div className="animate-in fade-in slide-in-from-bottom-2 duration-300">
             <div className="bg-white p-6 rounded-2xl border shadow-sm mb-6 space-y-4">
@@ -919,11 +1035,10 @@ function AdminDashboard() {
           </div>
         )}
 
-        {/* --- TAB: USERS --- */}
+        {/* 💡 อัปเดตส่วน USERS (เพิ่ม UI ให้ Admin ลบประวัติ หรือ Reset เด็กได้) */}
         {activeTab === "users" && (
           <div className="animate-in fade-in slide-in-from-bottom-2 duration-300">
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-              {/* ซ้าย: รายชื่อนักเรียน */}
               <div className="lg:col-span-4 rounded-2xl border bg-white shadow-sm p-5 flex flex-col h-[75vh]">
                 <div className="flex justify-between items-center mb-5">
                   <h3 className="font-bold text-lg text-slate-800">รายชื่อนักเรียน</h3>
@@ -944,12 +1059,12 @@ function AdminDashboard() {
                 </div>
               </div>
 
-              {/* ขวา: รายละเอียดและสิทธิ์ของนักเรียน */}
               {selectedStudent ? (
                 <div className="lg:col-span-8 rounded-2xl border bg-white shadow-sm p-6 space-y-6">
                   <div className="flex justify-between items-start">
                     <h3 className="font-bold text-lg text-slate-800 flex items-center gap-2"><BarChart3 className="size-5 text-primary"/> ข้อมูลและผลการเรียน</h3>
                     <div className="flex gap-2">
+                      <button onClick={() => handleResetStudentData(selectedStudent)} className="p-2 text-slate-500 hover:text-amber-600 bg-slate-50 hover:bg-amber-50 rounded-xl transition-colors border shadow-sm" title="รีเซ็ตข้อมูลการสอบทั้งหมด"><RefreshCw className="size-4"/></button>
                       <button onClick={() => handleOpenEditStudent(selectedStudent)} className="p-2 text-slate-500 hover:text-primary bg-slate-50 hover:bg-primary/10 rounded-xl transition-colors border shadow-sm" title="แก้ไขข้อมูลและสิทธิ์"><Edit className="size-4"/></button>
                       <button onClick={() => handleDeleteStudent(selectedStudent.id)} className="p-2 text-slate-500 hover:text-red-500 bg-slate-50 hover:bg-red-50 rounded-xl transition-colors border shadow-sm" title="ลบนักเรียน"><Trash2 className="size-4"/></button>
                     </div>
@@ -966,7 +1081,6 @@ function AdminDashboard() {
                       </button>
                     </div>
 
-                    {/* แสดงสิทธิ์ระดับชั้นและแผนการเรียน */}
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-3 border-t border-slate-200">
                       <div className="bg-white p-3.5 rounded-xl border border-slate-200 space-y-1.5">
                         <span className="text-xs font-semibold text-slate-500 flex items-center gap-1.5"><ShieldCheck className="size-3.5 text-primary" /> สิทธิ์ระดับชั้น:</span>
@@ -977,6 +1091,44 @@ function AdminDashboard() {
                         <p className="text-sm font-bold text-slate-800">{getActivePermissionsText(selectedStudent.permissions, ["ISM", "EP", "ภาคปกติ"])}</p>
                       </div>
                     </div>
+                  </div>
+
+                  {/* 💡 ส่วนที่เพิ่มเข้ามา: กล่องแสดงประวัติการทำข้อสอบเพื่อกดลบ (รายครั้ง) */}
+                  <div className="bg-slate-50 p-6 rounded-2xl border border-slate-200/80 space-y-4 mt-6">
+                    <div className="flex items-center justify-between">
+                      <h4 className="font-bold text-slate-800 flex items-center gap-2"><History className="size-4 text-slate-500"/> ประวัติการทำข้อสอบล่าสุด</h4>
+                      <span className="text-xs font-semibold bg-white border px-2 py-1 rounded-md text-slate-500">{selectedStudent.examHistory?.length || 0} รายการ</span>
+                    </div>
+
+                    {selectedStudent.examHistory && selectedStudent.examHistory.length > 0 ? (
+                      <div className="space-y-3 max-h-64 overflow-y-auto pr-2 custom-scrollbar">
+                        {[...selectedStudent.examHistory].reverse().map((h: any) => (
+                           <div key={h.id} className="flex items-center justify-between bg-white p-4 rounded-xl border shadow-sm group">
+                             <div>
+                               <p className="font-semibold text-sm text-slate-800">{h.title}</p>
+                               <div className="flex items-center gap-3 mt-1.5">
+                                 <p className="text-xs text-slate-500">{h.date}</p>
+                                 <p className="text-xs font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-100">
+                                   คะแนน: {h.score}/{h.total}
+                                 </p>
+                               </div>
+                             </div>
+                             <button 
+                               onClick={() => handleDeleteStudentHistory(selectedStudent, h.id, h.exam_id)} 
+                               className="p-2 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors border border-transparent group-hover:border-red-100"
+                               title="ลบประวัติการทำสอบชุดนี้"
+                             >
+                               <Trash2 className="size-4"/>
+                             </button>
+                           </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="flex flex-col items-center justify-center py-6 text-slate-400 bg-white rounded-xl border border-dashed">
+                        <History className="size-8 mb-2 opacity-20" />
+                        <p className="text-sm font-medium">ยังไม่มีประวัติการทำข้อสอบ</p>
+                      </div>
+                    )}
                   </div>
                 </div>
               ) : (
@@ -989,9 +1141,6 @@ function AdminDashboard() {
         )}
       </main>
 
-      {/* ========================================= */}
-      {/* MODAL: เพิ่ม/แก้ไข บทเรียน */}
-      {/* ========================================= */}
       {showLessonModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm px-4">
           <div className="w-full max-w-lg rounded-2xl bg-white p-7 shadow-2xl animate-in zoom-in-95 duration-200">
@@ -1061,9 +1210,6 @@ function AdminDashboard() {
         </div>
       )}
 
-      {/* ========================================= */}
-      {/* 💡 MODAL: อัปโหลดชีทแบบฝึกหัด (อัปเดต Storage) */}
-      {/* ========================================= */}
       {showWorksheetModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm px-4">
           <div className="w-full max-w-lg rounded-2xl bg-white p-7 shadow-2xl animate-in zoom-in-95 duration-200">
@@ -1149,9 +1295,6 @@ function AdminDashboard() {
         </div>
       )}
 
-      {/* ========================================= */}
-      {/* MODAL: เพิ่ม/แก้ไข ข้อมูลและสิทธิ์นักเรียน */}
-      {/* ========================================= */}
       {showStudentModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm px-4 py-8">
           <div className="w-full max-w-2xl max-h-[90vh] overflow-y-auto custom-scrollbar rounded-2xl bg-white p-7 shadow-2xl animate-in zoom-in-95 duration-200">
@@ -1248,13 +1391,9 @@ function AdminDashboard() {
         </div>
       )}
 
-      {/* ========================================= */}
-      {/* 💡 MODAL: เพิ่ม/แก้ไข ข้อสอบ */}
-      {/* ========================================= */}
       {examModalMode !== "none" && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm px-4 py-6">
           
-          {/* STEP 1: ตั้งชื่อข้อสอบ */}
           {examModalMode === "exam_info" && (
             <div className="w-full max-w-lg rounded-2xl bg-white p-8 shadow-2xl animate-in zoom-in-95 duration-200">
               <div className="flex justify-between mb-6 border-b pb-3">
@@ -1307,6 +1446,35 @@ function AdminDashboard() {
                   </div>
                 </div>
 
+                <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <label className="text-sm font-bold text-slate-700">ระบบจับเวลาสอบ</label>
+                    <button
+                      type="button"
+                      onClick={() => setNewExamInfo(prev => ({ ...prev, is_timed: !prev.is_timed }))}
+                      className={`px-3 py-1 rounded-lg text-xs font-bold transition-all border ${
+                        newExamInfo.is_timed ? "bg-primary text-white border-primary" : "bg-white text-slate-500 border-slate-300"
+                      }`}
+                    >
+                      {newExamInfo.is_timed ? "เปิดใช้งาน (จับเวลา)" : "ปิดใช้งาน (ฝึกทำตามสบาย)"}
+                    </button>
+                  </div>
+
+                  {newExamInfo.is_timed && (
+                    <div className="flex items-center gap-3">
+                      <label className="text-xs font-semibold text-slate-600">ระยะเวลาสอบ:</label>
+                      <input
+                        type="number"
+                        min="1"
+                        value={newExamInfo.duration_minutes}
+                        onChange={e => setNewExamInfo(prev => ({ ...prev, duration_minutes: Number(e.target.value) || 60 }))}
+                        className="w-24 p-2 border rounded-lg text-sm bg-white text-center font-bold"
+                      />
+                      <span className="text-xs font-bold text-slate-500">นาที</span>
+                    </div>
+                  )}
+                </div>
+
                 <div className="grid grid-cols-2 gap-4 pt-1">
                   <div>
                     <label className="block text-sm font-bold text-slate-700 mb-1.5">รายวิชา</label>
@@ -1326,7 +1494,6 @@ function AdminDashboard() {
             </div>
           )}
 
-          {/* STEP 2: เลือกวิธีนำเข้า */}
           {examModalMode === "select" && (
             <div className="w-full max-w-xl rounded-2xl bg-white p-8 shadow-2xl animate-in fade-in slide-in-from-right-4">
               <div className="flex gap-3 mb-6 border-b pb-4"><button onClick={() => setExamModalMode("exam_info")} className="p-2"><ChevronLeft/></button><div><h2 className="text-xl font-bold text-slate-800">2. นำเข้าข้อคำถาม</h2><p className="text-sm text-slate-500">{newExamInfo.title}</p></div></div>
@@ -1337,7 +1504,6 @@ function AdminDashboard() {
             </div>
           )}
 
-          {/* STEP 3 (MANUAL): ระบบสร้าง/แก้ไขข้อสอบแบบ Manual */}
           {examModalMode === "manual" && (
             <div className="w-full max-w-4xl max-h-[90vh] flex flex-col rounded-2xl bg-white p-7 shadow-2xl animate-in fade-in">
               <div className="flex flex-col border-b pb-4 mb-4 gap-3">
@@ -1379,7 +1545,6 @@ function AdminDashboard() {
                 </div>
               </div>
 
-              {/* รายการข้อคำถาม */}
               <div className="flex-1 overflow-y-auto space-y-6 pr-2 custom-scrollbar">
                 {manualQuestions.map((q, qIdx) => (
                   <div key={q.id || qIdx} className={`border-2 rounded-2xl p-5 bg-white shadow-sm relative space-y-4 transition-all ${q.image_url === "NEEDS_IMAGE" ? "border-red-400 bg-red-50/30" : "border-slate-200"}`}>
@@ -1425,7 +1590,6 @@ function AdminDashboard() {
                       />
                     </div>
 
-                    {/* 💡 ส่วนอัปโหลดรูปภาพประกอบข้อสอบ (อัปเดต Storage) */}
                     <div className={`p-4 rounded-xl border relative ${q.image_url === "NEEDS_IMAGE" ? "bg-red-50 border-red-200 border-dashed" : "bg-slate-50 border-slate-200"}`}>
                       <label className={`text-xs font-semibold flex items-center gap-1.5 mb-2 ${q.image_url === "NEEDS_IMAGE" ? "text-red-600" : "text-slate-600"}`}>
                         <ImageIcon className={`size-4 ${q.image_url === "NEEDS_IMAGE" ? "text-red-500" : "text-primary"}`} /> รูปภาพประกอบโจทย์
@@ -1444,7 +1608,6 @@ function AdminDashboard() {
                       )}
                     </div>
 
-                    {/* โหมดปรนัย */}
                     {q.type === "choice" && (
                       <div className="space-y-3 pt-2">
                         <div className="flex justify-between items-center">
@@ -1481,7 +1644,6 @@ function AdminDashboard() {
                       </div>
                     )}
 
-                    {/* โหมดอัตนัย */}
                     {q.type === "subjective" && (
                       <div className="space-y-3 pt-2 bg-amber-50/50 p-4 rounded-xl border border-amber-200/60">
                         <div className="flex justify-between items-center">
@@ -1504,7 +1666,7 @@ function AdminDashboard() {
                             <div key={lineIdx} className="flex items-center gap-2">
                               <span className="font-bold text-xs text-amber-800 w-16">ช่องที่ {lineIdx + 1}:</span>
                               <input 
-                                type="text"
+                                type="text" 
                                 value={ans}
                                 onChange={(e) => updateSubjectiveAnswerText(qIdx, lineIdx, e.target.value)}
                                 className="flex-1 p-2.5 border border-amber-300 rounded-xl text-sm bg-white outline-none focus:ring-1 focus:ring-amber-500"
@@ -1525,9 +1687,22 @@ function AdminDashboard() {
                     )}
 
                     <div className="bg-emerald-50/60 p-4 rounded-xl border border-emerald-200 space-y-1.5">
-                      <label className="text-xs font-bold text-emerald-900 flex items-center gap-1.5">
-                        <Lightbulb className="size-4 text-emerald-600" /> คำอธิบายเฉลยและวิธีทำอย่างละเอียด
-                      </label>
+                      <div className="flex items-center justify-between mb-2">
+                        <label className="text-xs font-bold text-emerald-900 flex items-center gap-1.5">
+                          <Lightbulb className="size-4 text-emerald-600" /> คำอธิบายเฉลยและวิธีทำอย่างละเอียด
+                        </label>
+                        
+                        <button
+                          type="button"
+                          onClick={() => handleGenerateExplanation(qIdx)}
+                          disabled={generatingExpId === qIdx}
+                          className="text-[10px] sm:text-xs flex items-center gap-1 bg-emerald-100 hover:bg-emerald-200 text-emerald-700 px-2.5 py-1.5 rounded-lg font-bold transition-colors disabled:opacity-50 shadow-sm border border-emerald-200"
+                        >
+                          {generatingExpId === qIdx ? <Loader2 className="size-3 animate-spin"/> : <Sparkles className="size-3"/>}
+                          ให้ AI ช่วยเขียนเฉลย
+                        </button>
+                      </div>
+                      
                       <textarea
                         rows={3}
                         value={q.explanation || ""}
@@ -1553,8 +1728,6 @@ function AdminDashboard() {
             </div>
           )}
 
-          {/* STEP 3 (AI OCR) และ STEP 4 (AI RESULT) ขอคงไว้ตามเดิม ไม่มีการตัดทอนเพื่อความสมบูรณ์ */}
-          {/* STEP 3 (AI OCR): อัปโหลดรูปภาพ */}
           {examModalMode === "ai" && (
             <div className="w-full max-w-2xl rounded-2xl bg-white p-8 shadow-2xl animate-in fade-in slide-in-from-right-4">
               <div className="flex gap-3 mb-6"><button onClick={() => setExamModalMode("select")} className="p-2"><ChevronLeft/></button><h2 className="text-xl font-bold flex items-center gap-2"><Sparkles className="size-5 text-primary"/> เลือกรูปภาพข้อสอบที่ต้องการสแกน</h2></div>
@@ -1579,7 +1752,6 @@ function AdminDashboard() {
             </div>
           )}
 
-          {/* STEP 4 (AI RESULT): ตรวจสอบผลลัพธ์จาก AI */}
           {examModalMode === "ai_result" && (
             <div className="w-full max-w-3xl max-h-[90vh] flex flex-col rounded-2xl bg-white p-7 shadow-2xl animate-in zoom-in-95">
               <div className="flex justify-between mb-4 border-b pb-3">
@@ -1590,8 +1762,6 @@ function AdminDashboard() {
               <div className="flex-1 overflow-y-auto space-y-4 pr-2 custom-scrollbar">
                 {aiResult && aiResult.map((q, idx) => (
                   <div key={idx} className={`border rounded-xl p-4 space-y-2.5 ${q.image_url === "NEEDS_IMAGE" ? "bg-red-50/50 border-red-200" : "bg-slate-50/50 border-slate-200"}`}>
-                    
-                    {/* 💡 แจ้งเตือนสีแดงในหน้า Preview ผลลัพธ์ AI */}
                     {q.image_url === "NEEDS_IMAGE" && (
                       <div className="flex items-center gap-2 text-red-600 bg-red-100 px-3 py-1.5 rounded-lg text-[11px] font-bold mb-1 w-fit">
                         <AlertTriangle className="size-3.5" /> ข้อนี้ต้องอัปโหลดรูปภาพ! (เพิ่มรูปในโหมดแก้ไข)
@@ -1622,7 +1792,6 @@ function AdminDashboard() {
                       </div>
                     )}
 
-                    {/* กล่องแสดงวิธีทำจาก AI */}
                     {q.explanation && (
                       <div className="mt-3 p-3 bg-emerald-50/70 border border-emerald-200 rounded-xl text-xs text-emerald-900 space-y-1">
                         <p className="font-bold flex items-center gap-1.5 text-emerald-800"><Lightbulb className="size-3.5" /> เฉลยและวิธีทำ:</p>

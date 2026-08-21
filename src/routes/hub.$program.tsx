@@ -23,11 +23,20 @@ const DB_PROGRAM_MAP: Record<string, string> = {
   regular: "ภาคปกติ",
 };
 
+// ฟังก์ชันจับคู่วิชาให้ตรงกัน แม้ชื่อย่อหรือชื่อเต็มต่างกัน
+const matchSubject = (dbSubject: string | undefined, selectedSubject: string) => {
+  if (selectedSubject === "all") return true;
+  if (!dbSubject) return false;
+  const cleanDb = dbSubject.trim().toLowerCase();
+  const cleanSelected = selectedSubject.trim().toLowerCase();
+  return cleanDb.includes(cleanSelected) || cleanSelected.includes(cleanDb);
+};
+
 // ==========================================
 // 💡 คอมโพเนนต์ย่อย: กระดานฝึกเขียนอัจฉริยะ (AI ตรวจลายมือ)
 // ==========================================
 const SmartPracticeCanvas = ({ subject }: { subject: string }) => {
-  const sigCanvas = useRef<any>(null); // แก้ไข type เป็น any เพื่อป้องกัน error
+  const sigCanvas = useRef<any>(null);
   const [result, setResult] = useState<string>("");
   const [isChecking, setIsChecking] = useState(false);
 
@@ -117,21 +126,20 @@ const SmartPracticeCanvas = ({ subject }: { subject: string }) => {
   );
 };
 
-
 // ==========================================
 // 💡 คอมโพเนนต์หลัก: ExamHub (หน้านักเรียน)
 // ==========================================
 function ExamHub() {
   const { program } = Route.useLoaderData();
   
-  // 💡 เพิ่มโหมด "worksheet" เข้ามาใหม่
-  const [activeMode, setActiveMode] = useState<"study" | "worksheet" | "exam">("study");
+  // เริ่มต้นหน้าเว็บที่โหมด "exam" เพื่อให้ตรงกับข้อสอบที่มีอยู่
+  const [activeMode, setActiveMode] = useState<"study" | "worksheet" | "exam">("exam");
   const [subject, setSubject] = useState<string>("all");
   const [year, setYear] = useState<string>("all");
   
   const [allPapers, setAllPapers] = useState<any[]>([]);
   const [allLessons, setAllLessons] = useState<any[]>([]);
-  const [allWorksheets, setAllWorksheets] = useState<any[]>([]); // 💡 State เก็บข้อมูลชีท
+  const [allWorksheets, setAllWorksheets] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
@@ -154,7 +162,7 @@ function ExamHub() {
         .ilike('program', `%${dbProgram}%`);
       if (lessonsData) setAllLessons(lessonsData);
 
-      // 💡 ดึงข้อมูลชีทแบบฝึกหัด
+      // ดึงข้อมูลชีทแบบฝึกหัด
       const { data: worksheetsData } = await supabase
         .from('worksheets')
         .select('*')
@@ -167,9 +175,11 @@ function ExamHub() {
     fetchData();
   }, [program.id]);
 
-  const papers = allPapers.filter(p => (subject === "all" || p.subject === subject) && (year === "all" || String(p.year) === year));
-  const lessons = allLessons.filter(l => (subject === "all" || l.subject === subject));
-  const worksheets = allWorksheets.filter(w => (subject === "all" || w.subject === subject));
+  const papers = allPapers.filter(
+    (p) => matchSubject(p.subject, subject) && (year === "all" || String(p.year) === year)
+  );
+  const lessons = allLessons.filter((l) => matchSubject(l.subject, subject));
+  const worksheets = allWorksheets.filter((w) => matchSubject(w.subject, subject));
 
   return (
     <PageShell>
@@ -187,7 +197,7 @@ function ExamHub() {
           <p className="mt-2 text-base text-muted-foreground">{program.fullName}</p>
         </div>
 
-        {/* 💡 อัปเดตเมนูเป็น 3 โหมด */}
+        {/* เมนู 3 โหมด */}
         <div className="flex bg-slate-100 p-1.5 rounded-2xl w-full md:w-auto shadow-inner overflow-x-auto">
           <button 
             onClick={() => setActiveMode("study")}
@@ -212,9 +222,7 @@ function ExamHub() {
         </div>
       </div>
 
-      {/* ================================================= */}
-      {/* ส่วนกรองวิชา (ใช้ร่วมกันทุกโหมด) */}
-      {/* ================================================= */}
+      {/* กรองวิชา */}
       <section className="mt-10 animate-in fade-in" aria-labelledby="subjects-heading">
         <h2 id="subjects-heading" className="text-lg font-bold text-slate-800">กรองวิชา</h2>
         <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
@@ -222,7 +230,9 @@ function ExamHub() {
             const active = subject === s;
             return (
               <button
-                key={s} type="button" onClick={() => setSubject(active ? "all" : s)}
+                key={s}
+                type="button"
+                onClick={() => setSubject(active ? "all" : s)}
                 className={`card-surface flex flex-col items-start gap-2 p-5 text-left transition-all rounded-2xl border-2 ${
                   active ? "border-primary bg-primary/5 shadow-sm" : "border-transparent hover:border-slate-200"
                 }`}
@@ -235,9 +245,7 @@ function ExamHub() {
         </div>
       </section>
 
-      {/* ================================================= */}
-      {/* โหมด 1: ห้องเรียน (Lessons) */}
-      {/* ================================================= */}
+      {/* โหมด 1: ห้องเรียน */}
       {activeMode === "study" && (
         <div className="animate-in fade-in slide-in-from-bottom-2 duration-300 mt-12">
           <div className="flex flex-wrap items-end justify-between gap-4 mb-6">
@@ -294,9 +302,7 @@ function ExamHub() {
         </div>
       )}
 
-      {/* ================================================= */}
-      {/* 💡 โหมด 2: แบบฝึกหัด (Worksheets) */}
-      {/* ================================================= */}
+      {/* โหมด 2: แบบฝึกหัด */}
       {activeMode === "worksheet" && (
         <div className="animate-in fade-in slide-in-from-bottom-2 duration-300 mt-12">
           <div className="flex flex-wrap items-end justify-between gap-4 mb-6">
@@ -339,9 +345,7 @@ function ExamHub() {
         </div>
       )}
 
-      {/* ================================================= */}
-      {/* โหมด 3: ห้องสอบ (Exams) */}
-      {/* ================================================= */}
+      {/* โหมด 3: ห้องสอบ */}
       {activeMode === "exam" && (
         <div className="animate-in fade-in slide-in-from-bottom-2 duration-300 mt-12">
           <div className="flex flex-wrap items-end justify-between gap-4 mb-6">
@@ -356,7 +360,9 @@ function ExamHub() {
                 </SelectTrigger>
                 <SelectContent className="rounded-xl">
                   <SelectItem value="all">ทุกปีการศึกษา</SelectItem>
-                  {YEARS.map((y) => (<SelectItem key={y} value={String(y)}>ปี {y}</SelectItem>))}
+                  <SelectItem value="2566">ปี 2566</SelectItem>
+                  <SelectItem value="2565">ปี 2565</SelectItem>
+                  <SelectItem value="2564">ปี 2564</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -376,7 +382,7 @@ function ExamHub() {
                     <h3 className="text-lg font-bold text-slate-800">{paper.title}</h3>
                     <div className="mt-3 flex items-center gap-4 text-sm font-medium text-slate-500">
                       <span className="flex items-center gap-1.5 bg-slate-50 px-2.5 py-1 rounded-md"><FileText className="size-4 text-slate-400" /> {paper.total_questions} ข้อ</span>
-                      <span className="flex items-center gap-1.5 bg-slate-50 px-2.5 py-1 rounded-md"><Timer className="size-4 text-slate-400" /> 90 นาที</span>
+                      <span className="flex items-center gap-1.5 bg-slate-50 px-2.5 py-1 rounded-md"><Timer className="size-4 text-slate-400" /> {paper.is_timed === false ? "ไม่จับเวลา" : `${paper.duration_minutes || 90} นาที`}</span>
                     </div>
                   </div>
                   <Button asChild className="mt-6 w-full rounded-xl bg-rose-50 text-rose-600 hover:bg-rose-600 hover:text-white transition-all font-bold group">

@@ -32,7 +32,18 @@ export const PROGRAMS: Record<ProgramId, Program> = {
   },
 };
 
-export const YEARS = [2566, 2565, 2564, 2563, 2562, 2561, 2560];
+export const YEARS = [2567, 2566, 2565, 2564, 2563, 2562, 2561, 2560];
+
+// ฟังก์ชันจับคู่ชื่อวิชา (รองรับทั้งชื่อย่อและชื่อเต็ม เช่น คณิต / คณิตศาสตร์)
+export function normalizeSubjectMatch(dbSubject?: string, filterSubject?: string): boolean {
+  if (!filterSubject || filterSubject === "all") return true;
+  if (!dbSubject) return false;
+  
+  const cleanDb = dbSubject.trim().toLowerCase();
+  const cleanFilter = filterSubject.trim().toLowerCase();
+
+  return cleanDb.includes(cleanFilter) || cleanFilter.includes(cleanDb);
+}
 
 export type Paper = {
   id: string;
