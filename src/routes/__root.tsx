@@ -13,6 +13,21 @@ import appCss from "../styles.css?url";
 import { reportLovableError } from "../lib/lovable-error-reporting";
 import { supabase } from "../lib/supabase";
 
+// ==========================================
+// 💡 การตั้งค่าระบบหลัก
+// ==========================================
+
+// 1️⃣ เปลี่ยนเลขนี้ทุกครั้งที่มีการอัปเดตฟีเจอร์หรือแก้บั๊ก! 
+// ระบบจะบังคับให้นักเรียนโหลดหน้าเว็บใหม่และล้างแคชเก่าอัตโนมัติ
+const APP_VERSION = "1.0.1"; 
+
+// 2️⃣ รายชื่อแอดมิน (สามารถล็อกอินพร้อมกันหลายเครื่องได้)
+const ADMIN_EMAILS = [
+  "ttanasak@gmail.com"
+];
+
+// ==========================================
+
 function NotFoundComponent() {
   return (
     <div className="flex min-h-screen items-center justify-center bg-background px-4">
@@ -136,14 +151,72 @@ function RootComponent() {
   const { queryClient } = Route.useRouteContext();
   const router = useRouter();
 
+  // 1️⃣ ระบบสแกนเวอร์ชันแอป: บังคับล้างแคชและรีเฟรชเมื่อแอดมินปล่อยอัปเดตใหม่
   useEffect(() => {
+    const currentLocalVersion = localStorage.getItem("app_version");
+    
+    if (currentLocalVersion !== APP_VERSION) {
+      console.log("🔥 พบแอปเวอร์ชันใหม่! กำลังล้างแคชและอัปเดต...");
+      localStorage.setItem("app_version", APP_VERSION);
+      
+      if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.getRegistrations().then((registrations) => {
+          for (let registration of registrations) {
+            registration.unregister();
+          }
+        }).then(() => {
+          window.location.reload();
+        });
+      } else {
+        window.location.reload();
+      }
+    }
+  }, []);
+
+  // 2️⃣ ระบบ Auth & ป้องกันล็อกอินซ้อน
+  useEffect(() => {
+    // ดักจับการ Logout ปกติ
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
       if (event === 'SIGNED_OUT') {
         router.navigate({ to: '/login', replace: true });
       }
     });
 
-    return () => subscription.unsubscribe();
+    // ตั้งเวลาเช็กการล็อกอินซ้อน (ทุกๆ 5 วินาที)
+    const checkSessionInterval = setInterval(async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.user?.email) return;
+
+      const cleanEmail = session.user.email.toLowerCase().trim();
+
+      // ข้ามการตรวจล็อกอินซ้อนถ้าเป็นแอดมิน
+      if (ADMIN_EMAILS.includes(cleanEmail)) return;
+
+      // ดึงค่า Token ของเครื่องที่ล็อกอินล่าสุดมาจากฐานข้อมูล
+      const { data: student } = await supabase
+        .from('students')
+        .select('session_token')
+        .eq('email', cleanEmail)
+        .single();
+
+      if (student) {
+        const localToken = localStorage.getItem("student_session");
+        
+        // ถ้ารหัส Token ในเครื่องนี้ ไม่ตรงกับรหัสเครื่องล่าสุดในฐานข้อมูล = โดนเตะออก
+        if (student.session_token && localToken !== student.session_token) {
+          clearInterval(checkSessionInterval);
+          alert("⚠️ มีการเข้าสู่ระบบบัญชีนี้จากอุปกรณ์อื่น\n\nระบบจะทำการออกจากระบบในอุปกรณ์นี้โดยอัตโนมัติ");
+          await supabase.auth.signOut();
+          localStorage.removeItem("student_session");
+          window.location.href = "/login";
+        }
+      }
+    }, 5000); // 5000 ms = 5 วินาที
+
+    return () => {
+      subscription.unsubscribe();
+      clearInterval(checkSessionInterval); // เคลียร์ Interval เมื่อเปลี่ยนหน้า/ปิดคอมโพเนนต์
+    };
   }, [router]);
 
   return (
