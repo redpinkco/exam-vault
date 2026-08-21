@@ -36,11 +36,11 @@ const AITutorChat = ({ questionData, userAnswer, correctAnswer }: { questionData
     setIsTyping(true);
 
     try {
-      // ⬇️⚠️ นำ API Key ที่ขึ้นต้นด้วย AIza... มาวางที่นี่ครับ ⚠️⬇️
-      const apiKey = "ใส่_API_KEY_ของคุณที่นี่";
+      // ✅ ดึงคีย์ผ่าน Environment Variable อย่างปลอดภัย
+      const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
       
-      if(apiKey === "ใส่_API_KEY_ของคุณที่นี่") {
-        setMessages(prev => [...prev, { role: "ai", text: "คุณครู AI ยังไม่พร้อมทำงาน กรุณาใส่ API Key ในโค้ดก่อนนะครับ" }]);
+      if(!apiKey) {
+        setMessages(prev => [...prev, { role: "ai", text: "คุณครู AI ยังไม่พร้อมทำงาน กรุณาตั้งค่า API Key ในไฟล์ .env ก่อนนะครับ" }]);
         setIsTyping(false);
         return;
       }
@@ -155,11 +155,11 @@ const SubjectiveCanvas = ({ answer, onUpdate }: { answer: string; onUpdate: (val
     try {
       const imageBase64 = sigCanvas.current?.getTrimmedCanvas().toDataURL("image/jpeg", 0.9).split(",")[1];
       
-      // ⬇️⚠️ นำ API Key ที่ขึ้นต้นด้วย AIza... มาวางที่นี่ครับ ⚠️⬇️
-      const apiKey = "ใส่_API_KEY_ของคุณที่นี่";
+      // ✅ ดึงคีย์ผ่าน Environment Variable อย่างปลอดภัย
+      const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
       
-      if(apiKey === "ใส่_API_KEY_ของคุณที่นี่") {
-        alert("กรุณาใส่ API Key ในระบบก่อนใช้งาน AI ตรวจลายมือ");
+      if(!apiKey) {
+        alert("กรุณาตั้งค่า API Key ในไฟล์ .env ก่อนใช้งาน AI ตรวจลายมือ");
         setIsChecking(false);
         return;
       }

@@ -82,7 +82,15 @@ function WorksheetPage() {
       const finalImageBase64 = mergeCanvas.toDataURL("image/jpeg", 0.8).split(",")[1];
 
       // 4. ส่งให้ Gemini ตรวจ
-      const apiKey = "AQ.Ab8RN6LyaWE8FG3kCDnfyGsKsiDEoSVaTT3m0TMnClGY5-Vyow"; 
+      // ✅ ดึงคีย์ผ่าน Environment Variable อย่างปลอดภัย
+      const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
+      
+      if(!apiKey) {
+        alert("กรุณาตั้งค่า API Key ในไฟล์ .env ก่อนใช้งาน AI ตรวจกระดาษคำตอบ");
+        setIsChecking(false);
+        return;
+      }
+      
       const prompt = `ทำหน้าที่เป็นคุณครูใจดี ตรวจแบบฝึกหัดในรูปภาพนี้ รูปนี้ประกอบด้วยโจทย์และลายมือเขียนคำตอบของนักเรียนซ้อนทับกันอยู่ 
       กรุณาอ่านลายมือและตรวจสอบความถูกต้องทีละข้อ (อิงจากโจทย์ในรูป) พร้อมสรุปคะแนนคร่าวๆ และให้คำแนะนำนักเรียนอย่างเป็นกันเองและให้กำลังใจ`;
 

@@ -501,7 +501,7 @@ function AdminDashboard() {
     setGeneratingExpId(qIndex);
     try {
       // ✅ ใช้ API Key จากในรูปภาพของคุณเลยครับ
-      const apiKey = "AQ.Ab8RN6Jg8U1H7UQ9oobaTQZbuD1BfGtAz8hbr7U1p0HGCPms3w";
+      const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
 
       let promptText = "";
       const questionText = q.question ? q.question : "วิเคราะห์และแก้โจทย์ปัญหาจากรูปภาพประกอบ";
@@ -587,7 +587,7 @@ function AdminDashboard() {
     setAiResult(null);
 
     // ✅ ใช้ API Key จากในรูปภาพของคุณเลยครับ
-    const apiKey = "AQ.Ab8RN6Jg8U1H7UQ9oobaTQZbuD1BfGtAz8hbr7U1p0HGCPms3w";
+    const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
 
     try {
       const imageParts = await Promise.all(
