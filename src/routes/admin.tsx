@@ -255,7 +255,7 @@ function AdminDashboard() {
       s.scores?.math || 0,
       s.scores?.science || 0,
       s.scores?.english || 0,
-      (s.examHistory || []).length
+      (s.exam_History || []).length
     ]);
 
     const csvContent = "data:text/csv;charset=utf-8,\uFEFF" + [headers.join(","), ...rows.map(e => e.join(","))].join("\n");
@@ -424,8 +424,8 @@ function AdminDashboard() {
     if (!confirm("⚠️ คุณต้องการรีเซ็ตผลสอบ ประวัติ และคะแนนของนักเรียน 'ทุกคน' ใช่หรือไม่?\n\n* บัญชีและสิทธิ์จะยังคงอยู่\n* สถิติและประวัติสอบจะถูกเคลียร์เป็น 0 ทั้งหมด")) return;
 
     const { error } = await supabase.from('students').update({
-      examHistory: [],
-      mistakeBank: [],
+      exam_History: [],
+      mistake_Bank: [],
       scores: { math: 0, english: 0, science: 0, thai: 0, social: 0 }
     }).neq('id', 0);
 
@@ -439,8 +439,8 @@ function AdminDashboard() {
       if (selectedStudent) {
         setSelectedStudent({
           ...selectedStudent,
-          examHistory: [],
-          mistakeBank: [],
+          exam_History: [],
+          mistake_Bank: [],
           scores: { math: 0, english: 0, science: 0, thai: 0, social: 0 }
         });
       }
@@ -450,12 +450,12 @@ function AdminDashboard() {
   const handleDeleteStudentHistory = async (studentToUpdate: any, historyId: number, examId: number) => {
     if (!confirm("⚠️ ต้องการลบประวัติการสอบชุดนี้ใช่หรือไม่?\n\n* ข้อมูลในคลังข้อผิดจะถูกลบด้วย\n* ข้อมูลคะแนนในกระดานจัดอันดับ (Leaderboard) จะถูกล้างออกเพื่อความเป็นธรรม")) return;
 
-    const newHistory = (studentToUpdate.examHistory || []).filter((h: any) => h.id !== historyId);
-    const newMistakes = (studentToUpdate.mistakeBank || []).filter((m: any) => m.exam_id !== examId);
+    const newHistory = (studentToUpdate.exam_History || []).filter((h: any) => h.id !== historyId);
+    const newMistakes = (studentToUpdate.mistake_Bank || []).filter((m: any) => m.exam_id !== examId);
 
     const { error } = await supabase.from('students').update({
-      examHistory: newHistory,
-      mistakeBank: newMistakes
+      exam_History: newHistory,
+      mistake_Bank: newMistakes
     }).eq('id', studentToUpdate.id);
 
     if (error) return alert("เกิดข้อผิดพลาด: " + error.message);
@@ -467,15 +467,15 @@ function AdminDashboard() {
 
     alert("ลบประวัติการสอบเรียบร้อย");
     fetchStudents();
-    setSelectedStudent({ ...studentToUpdate, examHistory: newHistory, mistakeBank: newMistakes });
+    setSelectedStudent({ ...studentToUpdate, exam_History: newHistory, mistake_Bank: newMistakes });
   };
 
   const handleResetStudentData = async (studentToUpdate: any) => {
     if (!confirm("🚨 คำเตือน: คุณต้องการรีเซ็ตผลสอบทั้งหมดของนักเรียนคนนี้ใช่หรือไม่?\n\n* ประวัติการสอบและคลังข้อผิดจะหายไปทั้งหมด\n* บัญชีและสิทธิ์การเข้าถึงจะยังคงอยู่ปกติ\n* การกระทำนี้ไม่สามารถย้อนกลับได้!")) return;
 
     const { error } = await supabase.from('students').update({
-      examHistory: [],
-      mistakeBank: [],
+      exam_History: [],
+      mistake_Bank: [],
       scores: { math: 0, english: 0, science: 0, thai: 0, social: 0 }
     }).eq('id', studentToUpdate.id);
 
@@ -487,8 +487,8 @@ function AdminDashboard() {
     fetchStudents();
     setSelectedStudent({ 
       ...studentToUpdate, 
-      examHistory: [], 
-      mistakeBank: [], 
+      exam_History: [], 
+      mistake_Bank: [], 
       scores: { math: 0, english: 0, science: 0, thai: 0, social: 0 } 
     });
   };
@@ -1463,12 +1463,12 @@ function AdminDashboard() {
                   <div className="bg-slate-50 p-6 rounded-3xl border border-slate-200/80 space-y-4 mt-6">
                     <div className="flex items-center justify-between">
                       <h4 className="font-bold text-slate-800 flex items-center gap-2"><History className="size-4 text-slate-500"/> ประวัติการทำข้อสอบล่าสุด</h4>
-                      <span className="text-xs font-semibold bg-white border px-2.5 py-1 rounded-xl text-slate-500">{selectedStudent.examHistory?.length || 0} รายการ</span>
+                      <span className="text-xs font-semibold bg-white border px-2.5 py-1 rounded-xl text-slate-500">{selectedStudent.exam_History?.length || 0} รายการ</span>
                     </div>
 
-                    {selectedStudent.examHistory && selectedStudent.examHistory.length > 0 ? (
+                    {selectedStudent.exam_History && selectedStudent.exam_History.length > 0 ? (
                       <div className="space-y-3 max-h-64 overflow-y-auto pr-2 custom-scrollbar">
-                        {[...selectedStudent.examHistory].reverse().map((h: any) => (
+                        {[...selectedStudent.exam_History].reverse().map((h: any) => (
                            <div key={h.id} className="flex items-center justify-between bg-white p-4 rounded-2xl border shadow-sm group">
                              <div>
                                <p className="font-bold text-sm text-slate-800">{h.title}</p>
