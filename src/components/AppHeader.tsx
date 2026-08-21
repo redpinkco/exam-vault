@@ -1,7 +1,7 @@
 import { Link, useNavigate } from "@tanstack/react-router";
 import { useEffect, useState, useRef } from "react";
 import logo from "@/assets/logo.png";
-import { UserCircle, LogOut, BarChart3, History, ChevronDown, User, Trophy, Sparkles } from "lucide-react";
+import { UserCircle, LogOut, BarChart3, History, ChevronDown, User, Trophy } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 
 export function AppHeader() {
@@ -43,9 +43,9 @@ export function AppHeader() {
   };
 
   return (
-    <header className="sticky top-3 z-40 mx-auto max-w-6xl px-3 sm:px-6">
-      {/* Floating Glass Dock Navbar */}
-      <div className="glass-dock squircle px-4 sm:px-6 h-16 flex items-center justify-between transition-all duration-300">
+    <header className="sticky top-3 z-40 w-full px-4 sm:px-8 lg:px-12 transition-all">
+      {/* Floating Glass Dock Navbar ขยายเต็มความกว้างสวยงาม */}
+      <div className="glass-dock squircle mx-auto w-full max-w-screen-2xl px-4 sm:px-8 h-16 flex items-center justify-between transition-all duration-300">
         
         {/* Brand Logo */}
         <Link to="/" className="flex items-center gap-3 group">
@@ -60,7 +60,7 @@ export function AppHeader() {
 
         {/* Action Controls */}
         <div className="flex items-center gap-2.5">
-          {/* Top Scores Button (Squircle Clay) */}
+          {/* Top Scores Button */}
           <Link
             to={"/leaderboard" as any}
             className="flex items-center gap-1.5 px-4 py-2 rounded-2xl text-xs font-black text-amber-800 bg-gradient-to-b from-amber-100 to-amber-200/80 hover:from-amber-200 hover:to-amber-300 border border-amber-300/80 shadow-[0_2px_0_0_#d97706] active:translate-y-0.5 active:shadow-none transition-all"
@@ -80,7 +80,7 @@ export function AppHeader() {
                 <div className="flex size-5 items-center justify-center rounded-lg bg-primary/10 text-primary">
                   <User className="size-3.5" />
                 </div>
-                <span className="hidden sm:inline-block max-w-[120px] truncate">
+                <span className="hidden sm:inline-block max-w-[140px] truncate">
                   {user.email}
                 </span>
                 <ChevronDown className={`size-3.5 text-slate-400 transition-transform duration-200 ${isDropdownOpen ? "rotate-180" : ""}`} />
