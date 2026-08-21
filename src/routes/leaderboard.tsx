@@ -2,7 +2,7 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { PageShell } from "@/components/PageShell";
-import { ChevronLeft, Trophy, Medal, Loader2, Star, TrendingUp, Sparkles, Crown } from "lucide-react";
+import { ChevronLeft, Trophy, Loader2, TrendingUp, Crown } from "lucide-react";
 
 export const Route = createFileRoute("/leaderboard")({
   component: LeaderboardPage,
@@ -33,7 +33,10 @@ function LeaderboardPage() {
         setCurrentUserEmail(session.user.email || null);
       }
 
-      const { data, error } = await supabase.from("students").select("name, email, scores");
+      const { data, error } = await supabase
+        .from("students")
+        .select("id, name, email, scores, examHistory");
+
       if (error) throw error;
 
       setStudents(data || []);
@@ -57,9 +60,10 @@ function LeaderboardPage() {
 
   const rankedStudents = students
     .map((s) => ({
-      name: s.name,
+      id: s.id,
+      name: s.name || "นักเรียน",
       email: s.email,
-      score: s.scores?.[activeSubject] || 0,
+      score: Number(s.scores?.[activeSubject]) || 0,
     }))
     .filter((s) => s.score > 0)
     .sort((a, b) => b.score - a.score);
@@ -188,7 +192,7 @@ function LeaderboardPage() {
               </div>
             </div>
 
-            {/* Other Ranks Table (Liquid Glass List) */}
+            {/* Other Ranks Table */}
             {otherRanks.length > 0 && (
               <div className="backdrop-blur-xl bg-white/80 border border-white/90 rounded-3xl p-4 sm:p-6 shadow-[0_10px_35px_rgba(0,0,0,0.04)] space-y-2.5">
                 {otherRanks.map((student, idx) => {

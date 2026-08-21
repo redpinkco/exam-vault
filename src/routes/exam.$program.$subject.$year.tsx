@@ -4,7 +4,7 @@ import {
   ChevronLeft, ChevronRight, CheckCircle2, X, Award, Lightbulb, 
   Check, XCircle, FileSearch, Eraser, Sparkles, Loader2, PenTool, 
   TrendingUp, BarChart2, Timer, Bookmark, 
-  BotMessageSquare, Send
+  BotMessageSquare, Send, ArrowRightCircle, RotateCcw
 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import SignatureCanvas from 'react-signature-canvas';
@@ -252,6 +252,7 @@ function ExamSessionPage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showResultModal, setShowResultModal] = useState(false);
   const [examResult, setExamResult] = useState<any>(null);
+  const [attemptCount, setAttemptCount] = useState<number>(1);
 
   const [statsData, setStatsData] = useState<{
     percentile: number;
@@ -319,9 +320,15 @@ function ExamSessionPage() {
       return;
     }
 
-    setExamData(examList[0]);
-    if (examList[0].duration_minutes && examList[0].is_timed !== false) {
-      setTimeLeft(Number(examList[0].duration_minutes) * 60);
+    const fetchedExam = examList[0];
+    setExamData(fetchedExam);
+    
+    // ตรวจสอบว่าเคยทำชุดนี้มาก่อนหรือไม่ เพื่อระบุรอบการทำ
+    const previousAttempts = (currentStudent.examHistory || []).filter((h: any) => h.exam_id === fetchedExam.id);
+    setAttemptCount(previousAttempts.length + 1);
+
+    if (fetchedExam.duration_minutes && fetchedExam.is_timed !== false) {
+      setTimeLeft(Number(fetchedExam.duration_minutes) * 60);
     }
   };
 
@@ -338,6 +345,17 @@ function ExamSessionPage() {
     setBookmarkedIndexes(prev => 
       prev.includes(idx) ? prev.filter(i => i !== idx) : [...prev, idx]
     );
+  };
+
+  const handleJumpToNextUnanswered = () => {
+    const nextUnanswered = questions.findIndex((_: any, idx: number) => 
+      userAnswers[idx] === undefined || userAnswers[idx] === ""
+    );
+    if (nextUnanswered !== -1) {
+      setCurrentIdx(nextUnanswered);
+    } else {
+      alert("🎉 คุณตอบข้อสอบครบทุกข้อเรียบร้อยแล้ว!");
+    }
   };
 
   const formatTime = (seconds: number) => {
@@ -395,18 +413,24 @@ function ExamSessionPage() {
       setExamResult(resultPayload);
       setIsSubmitted(true);
 
-      await supabase.from('exam_submissions').insert([{
-        exam_id: examData.id,
-        student_id: typeof student.id === 'number' ? student.id : null,
-        student_name: student.name || "นักเรียน",
-        score: score,
-        total: total,
-        percentage: percentage,
-        program: decodeURIComponent(program),
-        subject: examData.subject,
-        year: String(examData.year)
-      }]);
+      const isFirstAttempt = attemptCount === 1;
 
+      // 1. บันทึกลง Leaderboard เฉพาะรอบแรกสุดเท่านั้น (เพื่อความยุติธรรม)
+      if (isFirstAttempt) {
+        await supabase.from('exam_submissions').insert([{
+          exam_id: examData.id,
+          student_id: typeof student.id === 'number' ? student.id : null,
+          student_name: student.name || "นักเรียน",
+          score: score,
+          total: total,
+          percentage: percentage,
+          program: decodeURIComponent(program),
+          subject: examData.subject,
+          year: String(examData.year)
+        }]);
+      }
+
+      // ดึงสถิติภาพรวมของผู้สอบทั้งหมด
       const { data: submissions } = await supabase
         .from('exam_submissions')
         .select('score, total, percentage')
@@ -452,11 +476,12 @@ function ExamSessionPage() {
           question_data: questions[d.qIndex]
         }));
 
+      // 2. บันทึกประวัติการสอบทุกรอบลงหน้าแดชบอร์ดนักเรียน
       const currentHistory = Array.isArray(student.examHistory) ? student.examHistory : [];
       const newHistoryRecord = {
         id: Date.now(),
         exam_id: examData.id,
-        title: examData.title,
+        title: isFirstAttempt ? examData.title : `${examData.title} (รอบที่ ${attemptCount})`,
         subject: examData.subject,
         year: examData.year,
         program: decodeURIComponent(program),
@@ -464,6 +489,7 @@ function ExamSessionPage() {
         total: total,
         date: new Date().toLocaleDateString('th-TH', { year: 'numeric', month: 'short', day: 'numeric' }),
         timeSpent: "เสร็จสิ้น",
+        attempt: attemptCount,
         mistakes: wrongQuestions
       };
 
@@ -477,7 +503,12 @@ function ExamSessionPage() {
       else if (examData.subject.includes("ไทย")) subjectKey = "thai";
       else if (examData.subject.includes("สังคม")) subjectKey = "social";
 
-      const updatedScores = { ...currentScores, [subjectKey]: percentage };
+      // อัปเดตคะแนนเฉพาะเมื่อได้คะแนนสูงกว่าเดิม หรือเป็นการทำครั้งแรก
+      const currentSubjectScore = currentScores[subjectKey] || 0;
+      const updatedScores = { 
+        ...currentScores, 
+        [subjectKey]: Math.max(currentSubjectScore, percentage) 
+      };
 
       if (typeof student.id === 'number') {
         await supabase.from("students").update({
@@ -521,7 +552,14 @@ function ExamSessionPage() {
           </button>
 
           <div>
-            <h2 className="font-bold text-lg text-slate-800 line-clamp-1">{examData.title}</h2>
+            <div className="flex items-center gap-2">
+              <h2 className="font-bold text-lg text-slate-800 line-clamp-1">{examData.title}</h2>
+              {attemptCount > 1 && (
+                <span className="text-[10px] bg-amber-100 text-amber-800 border border-amber-200 font-bold px-2 py-0.5 rounded-lg shrink-0 flex items-center gap-1">
+                  <RotateCcw className="size-3" /> รอบที่ {attemptCount}
+                </span>
+              )}
+            </div>
             <p className="text-xs text-slate-500 mt-0.5">ตอบแล้ว {answeredCount} / {questions.length} ข้อ • ปักหมุด {bookmarkedIndexes.length} ข้อ</p>
           </div>
         </div>
@@ -629,7 +667,7 @@ function ExamSessionPage() {
             )}
           </div>
 
-          <div className="flex items-center justify-between pt-6 border-t mt-8">
+          <div className="flex flex-wrap items-center justify-between gap-3 pt-6 border-t mt-8">
             <button
               onClick={() => setCurrentIdx(prev => Math.max(0, prev - 1))}
               disabled={currentIdx === 0}
@@ -638,25 +676,38 @@ function ExamSessionPage() {
               <ChevronLeft className="size-4" /> ก่อนหน้า
             </button>
 
-            {isLastQuestion ? (
-              <button
-                onClick={() => {
-                  if (answeredCount < questions.length && !confirm("คุณยังทำข้อสอบไม่ครบทุกข้อ ยืนยันที่จะส่งข้อสอบหรือไม่?")) return;
-                  handleSubmitExam();
-                }}
-                disabled={isSubmitting || isSubmitted}
-                className="px-6 py-2.5 text-sm bg-emerald-600 text-white font-bold rounded-xl shadow-md hover:bg-emerald-700 transition flex items-center gap-1.5 disabled:opacity-50"
-              >
-                {isSubmitted ? "ดูผลลัพธ์แล้ว" : "ส่งคำตอบและดูผลสอบ"} <Check className="size-4" />
-              </button>
-            ) : (
-              <button
-                onClick={() => setCurrentIdx(prev => Math.min(questions.length - 1, prev + 1))}
-                className="px-5 py-2.5 text-sm bg-primary text-white font-bold rounded-xl hover:bg-primary/90 flex items-center gap-1.5 transition shadow-sm"
-              >
-                ข้อต่อไป <ChevronRight className="size-4" />
-              </button>
-            )}
+            <div className="flex items-center gap-2">
+              {!isSubmitted && answeredCount < questions.length && (
+                <button
+                  type="button"
+                  onClick={handleJumpToNextUnanswered}
+                  className="px-4 py-2.5 text-xs sm:text-sm bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 font-bold rounded-xl transition flex items-center gap-1.5 shadow-sm"
+                  title="กระโดดไปข้อที่ยังไม่ได้ตอบ"
+                >
+                  <ArrowRightCircle className="size-4 text-amber-600" /> ไปข้อที่ยังไม่ทำ ({questions.length - answeredCount})
+                </button>
+              )}
+
+              {isLastQuestion ? (
+                <button
+                  onClick={() => {
+                    if (answeredCount < questions.length && !confirm("คุณยังทำข้อสอบไม่ครบทุกข้อ ยืนยันที่จะส่งข้อสอบหรือไม่?")) return;
+                    handleSubmitExam();
+                  }}
+                  disabled={isSubmitting || isSubmitted}
+                  className="px-6 py-2.5 text-sm bg-emerald-600 text-white font-bold rounded-xl shadow-md hover:bg-emerald-700 transition flex items-center gap-1.5 disabled:opacity-50"
+                >
+                  {isSubmitted ? "ดูผลลัพธ์แล้ว" : "ส่งคำตอบและดูผลสอบ"} <Check className="size-4" />
+                </button>
+              ) : (
+                <button
+                  onClick={() => setCurrentIdx(prev => Math.min(questions.length - 1, prev + 1))}
+                  className="px-5 py-2.5 text-sm bg-primary text-white font-bold rounded-xl hover:bg-primary/90 flex items-center gap-1.5 transition shadow-sm"
+                >
+                  ข้อต่อไป <ChevronRight className="size-4" />
+                </button>
+              )}
+            </div>
           </div>
         </div>
 
@@ -664,10 +715,10 @@ function ExamSessionPage() {
         <div className="md:col-span-4 bg-white p-5 rounded-2xl border shadow-sm h-fit">
           <div className="flex items-center justify-between mb-4 pb-3 border-b">
             <h3 className="font-bold text-sm text-slate-800">แผงผังข้อสอบ</h3>
-            <div className="flex items-center gap-3 text-[10px] font-medium text-slate-500">
-              <span className="flex items-center gap-1"><div className="size-2 rounded-full bg-primary"></div> ตอบแล้ว</span>
-              <span className="flex items-center gap-1"><div className="size-2 rounded-full bg-amber-400"></div> ปักหมุด</span>
-              <span className="flex items-center gap-1"><div className="size-2 rounded-full bg-slate-200"></div> ยังไม่ตอบ</span>
+            <div className="flex items-center gap-2.5 text-[10px] font-bold">
+              <span className="flex items-center gap-1 text-emerald-700"><div className="size-2.5 rounded-md bg-emerald-600"></div> ทำแล้ว</span>
+              <span className="flex items-center gap-1 text-amber-700"><div className="size-2.5 rounded-md bg-amber-400"></div> ปักหมุด</span>
+              <span className="flex items-center gap-1 text-slate-500"><div className="size-2.5 rounded-md bg-slate-100 border border-dashed border-slate-300"></div> ว่าง</span>
             </div>
           </div>
           
@@ -677,23 +728,34 @@ function ExamSessionPage() {
               const isCurrent = currentIdx === idx;
               const isBookmarked = bookmarkedIndexes.includes(idx);
 
+              let buttonStyle = "bg-slate-100/80 text-slate-600 border border-slate-300 border-dashed hover:bg-slate-200";
+
+              if (isAnswered) {
+                buttonStyle = "bg-emerald-600 text-white font-black shadow-sm border border-emerald-700 hover:bg-emerald-700";
+              }
+
+              if (isBookmarked) {
+                buttonStyle = "bg-amber-400 text-amber-950 font-black border-2 border-amber-500 shadow-sm hover:bg-amber-500";
+              }
+
               return (
                 <button
                   key={idx}
                   onClick={() => setCurrentIdx(idx)}
-                  className={`h-10 rounded-xl text-xs font-bold transition-all relative ${
-                    isCurrent 
-                      ? "ring-2 ring-primary ring-offset-2 bg-primary text-white shadow-sm" 
-                      : isBookmarked
-                        ? "bg-amber-100 text-amber-800 border-2 border-amber-400"
-                        : isAnswered 
-                          ? "bg-primary/10 text-primary border border-primary/20" 
-                          : "bg-slate-100 text-slate-500 hover:bg-slate-200"
+                  className={`h-11 rounded-xl text-sm font-bold transition-all relative flex items-center justify-center ${buttonStyle} ${
+                    isCurrent ? "ring-4 ring-primary/40 ring-offset-2 scale-105 z-10" : ""
                   }`}
                 >
-                  {idx + 1}
+                  <span>{idx + 1}</span>
+
+                  {isAnswered && !isBookmarked && (
+                    <span className="absolute top-1 right-1 text-[9px] leading-none text-emerald-200 font-black">
+                      ✓
+                    </span>
+                  )}
+
                   {isBookmarked && (
-                    <Bookmark className="size-2.5 absolute top-1 right-1 fill-amber-500 text-amber-500" />
+                    <Bookmark className="size-3 absolute top-1 right-1 fill-amber-900 text-amber-900" />
                   )}
                 </button>
               );
@@ -711,7 +773,14 @@ function ExamSessionPage() {
               <button onClick={() => setShowResultModal(false)} className="absolute right-0 top-0 p-2 text-slate-400 hover:bg-slate-100 rounded-full transition"><X className="size-5"/></button>
               <Award className="size-14 text-amber-500 mx-auto mb-2" />
               <h2 className="text-2xl font-bold text-slate-800">สรุปผลการทดสอบ</h2>
-              <p className="text-xs sm:text-sm font-medium text-slate-500 mt-0.5">{examData.title}</p>
+              <div className="flex items-center justify-center gap-2 mt-0.5">
+                <p className="text-xs sm:text-sm font-medium text-slate-500">{examData.title}</p>
+                {attemptCount > 1 && (
+                  <span className="text-xs bg-amber-100 text-amber-800 font-bold px-2 py-0.5 rounded-md">
+                    รอบที่ {attemptCount} (ฝึกซ้ำ)
+                  </span>
+                )}
+              </div>
               
               <div className="mt-4 flex flex-wrap items-center justify-center gap-3">
                 <div className="inline-flex items-center justify-center gap-2 bg-amber-50 border border-amber-200 px-6 py-3 rounded-2xl shadow-sm">
