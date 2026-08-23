@@ -1,5 +1,5 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo } from "react";
 import { supabase } from "@/lib/supabase";
 import { PageShell } from "@/components/PageShell";
 import { ChevronLeft, Trophy, Loader2, TrendingUp, Crown } from "lucide-react";
@@ -8,12 +8,15 @@ export const Route = createFileRoute("/leaderboard")({
   component: LeaderboardPage,
 });
 
+// ✅ เพิ่ม 2 วิชาใหม่เข้าไปเรียบร้อยครับ
 const SUBJECTS = [
   { id: "math", name: "คณิตศาสตร์", color: "text-blue-600", activeBg: "bg-blue-600 text-white" },
   { id: "science", name: "วิทยาศาสตร์", color: "text-emerald-600", activeBg: "bg-emerald-600 text-white" },
   { id: "english", name: "ภาษาอังกฤษ", color: "text-rose-600", activeBg: "bg-rose-600 text-white" },
   { id: "thai", name: "ภาษาไทย", color: "text-amber-600", activeBg: "bg-amber-600 text-white" },
   { id: "social", name: "สังคมศึกษา", color: "text-purple-600", activeBg: "bg-purple-600 text-white" },
+  { id: "aptitude_math", name: "ความถนัดทางคณิตฯ", color: "text-cyan-600", activeBg: "bg-cyan-600 text-white" },
+  { id: "aptitude_eng", name: "ทักษะภาษาอังกฤษ", color: "text-fuchsia-600", activeBg: "bg-fuchsia-600 text-white" },
 ];
 
 function LeaderboardPage() {
@@ -33,9 +36,10 @@ function LeaderboardPage() {
         setCurrentUserEmail(session.user.email || null);
       }
 
+      // 🚀 แก้ปัญหาโหลดช้า: ตัด examHistory ออก ดึงมาเฉพาะสิ่งที่จำเป็นในการจัดอันดับเท่านั้น
       const { data, error } = await supabase
         .from("students")
-        .select("id, name, email, scores, examHistory");
+        .select("id, name, email, scores");
 
       if (error) throw error;
 
@@ -47,6 +51,19 @@ function LeaderboardPage() {
     }
   };
 
+  // ใช้ useMemo ป้องกันการคำนวณใหม่ถ้าข้อมูลไม่เปลี่ยน ช่วยให้คลิกเปลี่ยนวิชาได้ลื่นไหลขึ้น
+  const rankedStudents = useMemo(() => {
+    return students
+      .map((s) => ({
+        id: s.id,
+        name: s.name || "นักเรียน",
+        email: s.email,
+        score: Number(s.scores?.[activeSubject]) || 0,
+      }))
+      .filter((s) => s.score > 0)
+      .sort((a, b) => b.score - a.score);
+  }, [students, activeSubject]);
+
   if (isLoading) {
     return (
       <PageShell>
@@ -57,16 +74,6 @@ function LeaderboardPage() {
       </PageShell>
     );
   }
-
-  const rankedStudents = students
-    .map((s) => ({
-      id: s.id,
-      name: s.name || "นักเรียน",
-      email: s.email,
-      score: Number(s.scores?.[activeSubject]) || 0,
-    }))
-    .filter((s) => s.score > 0)
-    .sort((a, b) => b.score - a.score);
 
   const currentUserRankIndex = rankedStudents.findIndex((s) => s.email === currentUserEmail);
   const currentUserData = currentUserRankIndex !== -1 ? rankedStudents[currentUserRankIndex] : null;
@@ -102,7 +109,7 @@ function LeaderboardPage() {
         </div>
 
         {/* Subject Filter Pills */}
-        <div className="flex flex-wrap items-center justify-center gap-2 mb-10">
+        <div className="flex flex-wrap items-center justify-center gap-2 mb-10 max-w-4xl mx-auto">
           {SUBJECTS.map((sub) => {
             const active = activeSubject === sub.id;
             return (
@@ -112,7 +119,7 @@ function LeaderboardPage() {
                 className={`px-5 py-2.5 rounded-2xl font-bold text-xs sm:text-sm transition-all ${
                   active
                     ? `${sub.activeBg} shadow-md scale-105`
-                    : "bg-white/80 backdrop-blur-md text-slate-600 border border-white/80 hover:bg-white"
+                    : "bg-white/80 backdrop-blur-md text-slate-600 border border-slate-200 hover:bg-white"
                 }`}
               >
                 {sub.name}

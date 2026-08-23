@@ -1,5 +1,5 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { 
   LayoutDashboard, BookOpen, Users, PlusCircle, Edit, 
   Trash2, UploadCloud, FileText, X, BarChart3, Mail, Phone, Lock, Save, History, 
@@ -820,23 +820,30 @@ function AdminDashboard() {
   const matchFilterGrade = (itemGrades: string[], filterG: string) => filterG === "ทั้งหมด" || itemGrades.includes(filterG);
   const matchFilterProgram = (itemPrograms: string[], filterP: string) => filterP === "ทั้งหมด" || itemPrograms.includes(filterP);
 
-  const filteredExams = exams.filter(exam => {
-    return matchFilterGrade(safeGetArray(exam.grade), filterGrade) && 
-           matchFilterProgram(safeGetArray(exam.program), filterProgram) && 
-           matchFilterSubject(exam.subject, filterSubject);
-  });
+  // ✅ ใช้ useMemo เพื่อป้องกันไม่ให้ระบบคำนวณใหม่ทุกครั้งที่พิมพ์หรือกดปุ่มอื่น
+  const filteredExams = useMemo(() => {
+    return exams.filter(exam => {
+      return matchFilterGrade(safeGetArray(exam.grade), filterGrade) && 
+             matchFilterProgram(safeGetArray(exam.program), filterProgram) && 
+             matchFilterSubject(exam.subject, filterSubject);
+    });
+  }, [exams, filterGrade, filterProgram, filterSubject]);
 
-  const filteredLessons = lessons.filter(l => {
-    return matchFilterGrade(safeGetArray(l.grade), filterGrade) && 
-           matchFilterProgram(safeGetArray(l.program), filterProgram) && 
-           matchFilterSubject(l.subject, filterSubject);
-  });
+  const filteredLessons = useMemo(() => {
+    return lessons.filter(l => {
+      return matchFilterGrade(safeGetArray(l.grade), filterGrade) && 
+             matchFilterProgram(safeGetArray(l.program), filterProgram) && 
+             matchFilterSubject(l.subject, filterSubject);
+    });
+  }, [lessons, filterGrade, filterProgram, filterSubject]);
 
-  const filteredWorksheets = worksheets.filter(ws => {
-    return matchFilterGrade(safeGetArray(ws.grade), filterGrade) && 
-           matchFilterProgram(safeGetArray(ws.program), filterProgram) && 
-           matchFilterSubject(ws.subject, filterSubject);
-  });
+  const filteredWorksheets = useMemo(() => {
+    return worksheets.filter(ws => {
+      return matchFilterGrade(safeGetArray(ws.grade), filterGrade) && 
+             matchFilterProgram(safeGetArray(ws.program), filterProgram) && 
+             matchFilterSubject(ws.subject, filterSubject);
+    });
+  }, [worksheets, filterGrade, filterProgram, filterSubject]);
 
   const choiceLabels = ["ก.", "ข.", "ค.", "ง.", "จ."];
 

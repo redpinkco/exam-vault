@@ -19,7 +19,7 @@ const DB_PROGRAM_MAP: Record<string, string> = {
 };
 
 // ==========================================
-// 💡 คอมโพเนนต์ย่อย: กระดานทดเลข (ลบระบบ AI อ่านลายมือออกแล้ว)
+// 💡 คอมโพเนนต์ย่อย: กระดานทดเลข
 // ==========================================
 const SubjectiveCanvas = ({ answer, onUpdate }: { answer: string; onUpdate: (val: string) => void }) => {
   const sigCanvas = useRef<any>(null);
@@ -100,6 +100,13 @@ function ExamSessionPage() {
   const [showResultModal, setShowResultModal] = useState(false);
   const [examResult, setExamResult] = useState<any>(null);
   const [attemptCount, setAttemptCount] = useState<number>(1);
+  const [activeResultCard, setActiveResultCard] = useState(0); 
+
+  // ✅ States สำหรับระบบ Drag / Swipe & Wheel
+  const [isDragging, setIsDragging] = useState(false);
+  const [startX, setStartX] = useState(0);
+  const [startY, setStartY] = useState(0);
+  const wheelTimeout = useRef<NodeJS.Timeout | null>(null);
 
   const [statsData, setStatsData] = useState<{
     percentile: number;
@@ -108,6 +115,72 @@ function ExamSessionPage() {
     totalTakers: number;
     rankText: string;
   } | null>(null);
+
+  // 🖱️ ฟังก์ชันจัดการลาก (Drag / Swipe) ด้วยเมาส์และนิ้ว
+  const handleDragStart = (e: React.MouseEvent | React.TouchEvent) => {
+    setIsDragging(true);
+    const clientX = 'touches' in e ? e.touches[0]?.clientX || 0 : (e as React.MouseEvent).clientX;
+    const clientY = 'touches' in e ? e.touches[0]?.clientY || 0 : (e as React.MouseEvent).clientY;
+    setStartX(clientX);
+    setStartY(clientY);
+  };
+
+  const handleDragEnd = (e: React.MouseEvent | React.TouchEvent) => {
+    if (!isDragging) return;
+    setIsDragging(false);
+    const clientX = 'changedTouches' in e ? e.changedTouches[0]?.clientX || 0 : (e as React.MouseEvent).clientX;
+    const clientY = 'changedTouches' in e ? e.changedTouches[0]?.clientY || 0 : (e as React.MouseEvent).clientY;
+    
+    const diffX = startX - clientX;
+    const diffY = startY - clientY;
+
+    // เลื่อนถ้าลากไปซ้าย-ขวามากกว่าบน-ล่าง และลากยาวเกิน 50px
+    if (Math.abs(diffX) > Math.abs(diffY) && Math.abs(diffX) > 50) {
+      if (diffX > 0) setActiveResultCard(prev => Math.min(examResult.details.length - 1, prev + 1));
+      else setActiveResultCard(prev => Math.max(0, prev - 1));
+    }
+  };
+
+  // 🖱️ ฟังก์ชันจัดการลูกกลิ้งเมาส์ (Scroll Wheel)
+  const handleWheel = (e: React.WheelEvent) => {
+    if (wheelTimeout.current) return;
+    
+    if (Math.abs(e.deltaX) > 20 || Math.abs(e.deltaY) > 20) {
+      if (e.deltaX > 0 || e.deltaY > 0) setActiveResultCard(prev => Math.min(examResult.details.length - 1, prev + 1));
+      else setActiveResultCard(prev => Math.max(0, prev - 1));
+      
+      wheelTimeout.current = setTimeout(() => { wheelTimeout.current = null }, 350); 
+    }
+  };
+
+  // ดักจับการกดคีย์บอร์ดซ้าย-ขวา
+  useEffect(() => {
+    if (!showResultModal || !examResult) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "ArrowRight") setActiveResultCard(prev => Math.min(examResult.details.length - 1, prev + 1));
+      if (e.key === "ArrowLeft") setActiveResultCard(prev => Math.max(0, prev - 1));
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [showResultModal, examResult]);
+
+  useEffect(() => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (!isSubmitted && Object.keys(userAnswers).length > 0) {
+        e.preventDefault();
+        e.returnValue = ''; 
+      }
+    };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [userAnswers, isSubmitted]);
+
+  useEffect(() => {
+    if (!examData || !student || isSubmitted) return;
+    const storageKey = `exam_save_${examData.id}_student_${student.id}`;
+    const dataToSave = { userAnswers, currentIdx, bookmarkedIndexes, timeLeft };
+    localStorage.setItem(storageKey, JSON.stringify(dataToSave));
+  }, [userAnswers, currentIdx, bookmarkedIndexes, timeLeft, examData, student, isSubmitted]);
 
   useEffect(() => {
     fetchSessionAndExam();
@@ -170,12 +243,30 @@ function ExamSessionPage() {
     const fetchedExam = examList[0];
     setExamData(fetchedExam);
     
-    // ตรวจสอบว่าเคยทำชุดนี้มาก่อนหรือไม่ เพื่อระบุรอบการทำ
     const previousAttempts = (currentStudent.examHistory || []).filter((h: any) => h.exam_id === fetchedExam.id);
     setAttemptCount(previousAttempts.length + 1);
 
-    if (fetchedExam.duration_minutes && fetchedExam.is_timed !== false) {
-      setTimeLeft(Number(fetchedExam.duration_minutes) * 60);
+    const storageKey = `exam_save_${fetchedExam.id}_student_${currentStudent.id}`;
+    const savedData = localStorage.getItem(storageKey);
+
+    if (savedData) {
+      try {
+        const parsed = JSON.parse(savedData);
+        setUserAnswers(parsed.userAnswers || {});
+        setCurrentIdx(parsed.currentIdx || 0);
+        setBookmarkedIndexes(parsed.bookmarkedIndexes || []);
+        if (parsed.timeLeft !== undefined && fetchedExam.is_timed !== false) {
+          setTimeLeft(parsed.timeLeft);
+        } else if (fetchedExam.duration_minutes && fetchedExam.is_timed !== false) {
+          setTimeLeft(Number(fetchedExam.duration_minutes) * 60);
+        }
+      } catch (e) {
+        if (fetchedExam.duration_minutes && fetchedExam.is_timed !== false) setTimeLeft(Number(fetchedExam.duration_minutes) * 60);
+      }
+    } else {
+      if (fetchedExam.duration_minutes && fetchedExam.is_timed !== false) {
+        setTimeLeft(Number(fetchedExam.duration_minutes) * 60);
+      }
     }
   };
 
@@ -259,10 +350,10 @@ function ExamSessionPage() {
 
       setExamResult(resultPayload);
       setIsSubmitted(true);
+      setActiveResultCard(0);
 
       const isFirstAttempt = attemptCount === 1;
 
-      // 1. บันทึกลง Leaderboard เฉพาะรอบแรกสุดเท่านั้น (เพื่อความยุติธรรม)
       if (isFirstAttempt) {
         await supabase.from('exam_submissions').insert([{
           exam_id: examData.id,
@@ -277,7 +368,6 @@ function ExamSessionPage() {
         }]);
       }
 
-      // ดึงสถิติภาพรวมของผู้สอบทั้งหมด
       const { data: submissions } = await supabase
         .from('exam_submissions')
         .select('score, total, percentage')
@@ -323,7 +413,6 @@ function ExamSessionPage() {
           question_data: questions[d.qIndex]
         }));
 
-      // 2. บันทึกประวัติการสอบทุกรอบลงหน้าแดชบอร์ดนักเรียน
       const currentHistory = Array.isArray(student.examHistory) ? student.examHistory : [];
       const newHistoryRecord = {
         id: Date.now(),
@@ -350,7 +439,6 @@ function ExamSessionPage() {
       else if (examData.subject.includes("ไทย")) subjectKey = "thai";
       else if (examData.subject.includes("สังคม")) subjectKey = "social";
 
-      // อัปเดตคะแนนเฉพาะเมื่อได้คะแนนสูงกว่าเดิม หรือเป็นการทำครั้งแรก
       const currentSubjectScore = currentScores[subjectKey] || 0;
       const updatedScores = { 
         ...currentScores, 
@@ -364,6 +452,7 @@ function ExamSessionPage() {
         }).eq("id", student.id);
       }
 
+      localStorage.removeItem(`exam_save_${examData.id}_student_${student.id}`);
       setShowResultModal(true); 
 
     } catch (error) {
@@ -384,11 +473,7 @@ function ExamSessionPage() {
         <div className="flex items-center gap-3 w-full sm:w-auto">
           <button
             onClick={() => {
-              if (answeredCount > 0 && !isSubmitted) {
-                if (!confirm("คุณกำลังทำข้อสอบค้างอยู่ คำตอบที่ทำไว้จะไม่ถูกบันทึก\n\nต้องการออกจากห้องสอบใช่หรือไม่?")) {
-                  return;
-                }
-              }
+              if (answeredCount > 0 && !isSubmitted && !confirm("ต้องการออกจากห้องสอบใช่หรือไม่?\n(ระบบได้บันทึกคำตอบปัจจุบันไว้ให้แล้ว)")) return;
               navigate({ to: "/hub/$program", params: { program } });
             }}
             className="p-2 hover:bg-slate-100 rounded-xl text-slate-500 hover:text-slate-800 transition flex items-center gap-1 border border-slate-200"
@@ -611,143 +696,206 @@ function ExamSessionPage() {
         </div>
       </div>
 
-      {/* ✅ POPUP RESULT (แสดงผลลัพธ์) */}
+      {/* ✅ POPUP RESULT: ซ้ายคะแนน (ชิดขอบ) ขวาเฉลย (ใบเดียวใหญ่เต็มจอ) */}
       {showResultModal && examResult && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-2 sm:p-4">
-          <div className="bg-white rounded-[2rem] w-full max-w-5xl h-[95vh] flex flex-col p-4 sm:p-8 shadow-2xl animate-in zoom-in-95">
-            
-            <div className="text-center pb-6 border-b border-slate-100 relative shrink-0">
-              <button onClick={() => setShowResultModal(false)} className="absolute right-0 top-0 p-2 text-slate-400 hover:bg-slate-100 rounded-full transition"><X className="size-6"/></button>
-              <Award className="size-16 text-amber-500 mx-auto mb-2" />
-              <h2 className="text-2xl sm:text-3xl font-bold text-slate-800">สรุปผลการทดสอบ</h2>
-              <div className="flex items-center justify-center gap-2 mt-1">
-                <p className="text-sm sm:text-base font-medium text-slate-500">{examData.title}</p>
+        <div className="fixed inset-0 z-[100] flex flex-col lg:flex-row bg-slate-900/95 backdrop-blur-md overflow-hidden p-0 m-0">
+          
+          {/* ⬅️ ซ้าย: แผงสรุปคะแนน (ตั้ง z-index ให้ทับการ์ดและชิดขอบจอ) */}
+          <div className="w-full lg:w-[400px] h-[35vh] lg:h-full bg-white flex flex-col shadow-[10px_0_30px_rgba(0,0,0,0.2)] shrink-0 overflow-y-auto custom-scrollbar z-50 rounded-b-3xl lg:rounded-none lg:rounded-r-3xl">
+            <div className="p-6 sm:p-8 flex-1 flex flex-col">
+              <div className="text-center pb-6 border-b border-slate-100">
+                <Award className="size-16 text-amber-500 mx-auto mb-2" />
+                <h2 className="text-2xl font-bold text-slate-800">สรุปผลการทดสอบ</h2>
+                <p className="text-sm font-medium text-slate-500 mt-1 line-clamp-2">{examData.title}</p>
                 {attemptCount > 1 && (
-                  <span className="text-xs bg-amber-100 text-amber-800 font-bold px-2 py-0.5 rounded-md">
+                  <span className="text-[10px] bg-amber-100 text-amber-800 font-bold px-3 py-1 rounded-full mt-3 inline-block border border-amber-200">
                     รอบที่ {attemptCount} (ฝึกซ้ำ)
                   </span>
                 )}
               </div>
               
-              <div className="mt-5 flex flex-wrap items-center justify-center gap-4">
-                <div className="inline-flex items-center justify-center gap-2 bg-amber-50 border border-amber-200 px-6 py-4 rounded-2xl shadow-sm">
-                  <span className="text-5xl font-extrabold text-amber-600">{examResult.score}</span>
-                  <span className="text-xl font-medium text-amber-600/50">/</span>
-                  <span className="text-2xl font-bold text-amber-700">{examResult.total}</span>
-                  <span className="ml-2 text-base font-bold text-amber-800 bg-amber-200/60 px-3 py-1 rounded-lg">({examResult.percentage}%)</span>
+              <div className="flex-1 flex flex-col items-center justify-center py-6 gap-6">
+                <div className="inline-flex items-center justify-center gap-2 bg-amber-50 border border-amber-200 px-8 py-6 rounded-[2rem] shadow-sm w-full relative overflow-hidden">
+                  <div className="absolute -right-4 -top-4 size-24 bg-amber-200/50 rounded-full blur-2xl"></div>
+                  <div className="absolute -left-4 -bottom-4 size-24 bg-amber-300/30 rounded-full blur-2xl"></div>
+                  
+                  <span className="text-6xl font-extrabold text-amber-600 relative z-10">{examResult.score}</span>
+                  <span className="text-3xl font-medium text-amber-600/30 relative z-10">/</span>
+                  <span className="text-4xl font-bold text-amber-700 relative z-10">{examResult.total}</span>
                 </div>
 
+                <div className="w-full bg-slate-100 h-3 rounded-full overflow-hidden flex">
+                  <div className="bg-gradient-to-r from-amber-400 to-amber-600 h-full rounded-full transition-all duration-1000" style={{ width: `${Math.min(100, examResult.percentage)}%` }}></div>
+                </div>
+                <div className="text-base font-bold text-amber-800">คิดเป็น {examResult.percentage}%</div>
+
                 {statsData && (
-                  <div className="inline-flex items-center gap-3 bg-indigo-50 border border-indigo-200 px-5 py-4 rounded-2xl shadow-sm text-left">
-                    <TrendingUp className="size-8 text-indigo-600" />
-                    <div>
-                      <p className="text-xs font-bold uppercase tracking-wider text-indigo-500">Percentile Rank</p>
-                      <p className="text-base font-black text-indigo-900">ชนะผู้สอบ {statsData.percentile}%</p>
+                  <div className="w-full bg-gradient-to-br from-indigo-50 to-blue-50 border border-indigo-100 p-5 rounded-3xl shadow-sm text-center">
+                    <TrendingUp className="size-8 text-indigo-600 mx-auto mb-2" />
+                    <p className="text-[10px] font-bold uppercase tracking-wider text-indigo-500">Percentile Rank</p>
+                    <p className="text-lg font-black text-indigo-900 mt-0.5">ชนะผู้สอบ {statsData.percentile}%</p>
+                    
+                    <div className="mt-4 pt-4 border-t border-indigo-100/60 grid grid-cols-2 gap-2 text-xs">
+                      <div className="bg-white/60 p-2 rounded-xl">
+                        <p className="text-slate-400 text-[10px] mb-0.5">ผู้สอบทั้งหมด</p>
+                        <p className="font-bold text-indigo-900">{statsData.totalTakers} คน</p>
+                      </div>
+                      <div className="bg-white/60 p-2 rounded-xl">
+                        <p className="text-slate-400 text-[10px] mb-0.5">คะแนนเฉลี่ยระบบ</p>
+                        <p className="font-bold text-indigo-900">{statsData.avgScore}%</p>
+                      </div>
                     </div>
                   </div>
                 )}
               </div>
 
-              {statsData && (
-                <div className="mt-5 max-w-2xl mx-auto bg-slate-50 border border-slate-200/80 rounded-2xl p-5 text-left">
-                  <div className="flex items-center justify-between text-sm font-bold text-slate-600 mb-3">
-                    <span className="flex items-center gap-1.5"><BarChart2 className="size-5 text-primary" /> เปรียบเทียบคะแนนเฉลี่ย</span>
-                    <span className="text-indigo-600 bg-indigo-100/70 px-3 py-1 rounded-lg font-semibold">{statsData.rankText}</span>
-                  </div>
-
-                  <div className="grid grid-cols-3 gap-3 text-center text-sm mb-4">
-                    <div className="bg-white p-3 rounded-xl border shadow-sm">
-                      <p className="text-slate-400 text-xs mb-1">ผู้ทำข้อสอบชุดนี้</p>
-                      <p className="font-bold text-slate-700 text-base">{statsData.totalTakers} คน</p>
-                    </div>
-                    <div className="bg-white p-3 rounded-xl border shadow-sm">
-                      <p className="text-slate-400 text-xs mb-1">คะแนนเฉลี่ยระบบ</p>
-                      <p className="font-bold text-slate-700 text-base">{statsData.avgScore}%</p>
-                    </div>
-                    <div className="bg-white p-3 rounded-xl border shadow-sm">
-                      <p className="text-slate-400 text-xs mb-1">คะแนนสูงสุด</p>
-                      <p className="font-bold text-emerald-600 text-base">{statsData.maxScore}%</p>
-                    </div>
-                  </div>
-
-                  <div className="space-y-2 text-sm">
-                    <div className="flex justify-between font-semibold text-slate-600">
-                      <span>คะแนนของคุณ:</span>
-                      <span className="font-bold text-primary text-base">{examResult.percentage}%</span>
-                    </div>
-                    <div className="w-full bg-slate-200 h-3 rounded-full overflow-hidden flex">
-                      <div 
-                        className="bg-primary h-full rounded-full transition-all duration-1000" 
-                        style={{ width: `${Math.min(100, examResult.percentage)}%` }}
-                      ></div>
-                    </div>
-                  </div>
-                </div>
-              )}
-            </div>
-
-            {/* ส่วนแสดงรายข้อ (ลบกล่องถาม AI ออก) */}
-            <div className="flex-1 overflow-y-auto space-y-6 my-6 pr-2 custom-scrollbar">
-              {examResult.details.map((d: any, index: number) => (
-                <div key={index} className={`p-6 sm:p-8 rounded-3xl border shadow-sm ${d.isCorrect ? "bg-emerald-50/30 border-emerald-200" : "bg-red-50/30 border-red-200"}`}>
-                  <div className="flex items-start justify-between gap-6">
-                    <p className="font-bold text-base sm:text-lg text-slate-800 leading-relaxed whitespace-pre-line">
-                      ข้อ {index + 1}. {d.question}
-                    </p>
-                    <div className="shrink-0 mt-1">
-                      {d.isCorrect ? (
-                        <span className="flex items-center gap-1.5 text-emerald-700 font-bold text-sm bg-emerald-100 px-4 py-2 rounded-xl border border-emerald-200"><CheckCircle2 className="size-5" /> ถูกต้อง</span>
-                      ) : (
-                        <span className="flex items-center gap-1.5 text-red-700 font-bold text-sm bg-red-100 px-4 py-2 rounded-xl border border-red-200"><XCircle className="size-5" /> ผิด</span>
-                      )}
-                    </div>
-                  </div>
-
-                  {questions[index].image_url && (
-                    <div className="mt-5 mb-5 flex justify-start">
-                      <img src={questions[index].image_url} alt="Question Graphic" className="max-h-80 object-contain rounded-xl border bg-white p-2 shadow-sm" />
-                    </div>
-                  )}
-
-                  <div className="mt-6 grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm sm:text-base">
-                    <div className={`p-4 sm:p-5 rounded-2xl border ${d.isCorrect ? "bg-emerald-100/50 border-emerald-300 text-emerald-900" : "bg-red-100/50 border-red-300 text-red-900"}`}>
-                      <p className="text-xs sm:text-sm font-semibold mb-2 opacity-70">คำตอบที่คุณเลือก:</p>
-                      <p className="font-bold">{d.userAnswer !== undefined && d.userAnswer !== "" ? 
-                        (questions[index].type === "choice" ? questions[index].options[d.userAnswer] : d.userAnswer) 
-                        : "ไม่ได้ตอบ"}</p>
-                    </div>
-                    {!d.isCorrect && (
-                      <div className="p-4 sm:p-5 rounded-2xl border bg-emerald-50 border-emerald-300 text-emerald-900">
-                        <p className="text-xs sm:text-sm font-semibold mb-2 opacity-70">เฉลยคำตอบที่ถูกต้อง:</p>
-                        <p className="font-bold">{d.correctAnswer}</p>
-                      </div>
-                    )}
-                  </div>
-
-                  {d.explanation && d.explanation !== "ไม่มีคำอธิบายเพิ่มเติม" && (
-                    <div className="mt-6 p-5 sm:p-7 bg-white rounded-2xl border border-slate-200 shadow-sm w-full">
-                      <span className="font-bold flex items-center gap-2 text-amber-600 mb-4 text-base sm:text-lg">
-                        <Lightbulb className="size-5 sm:size-6" /> คำอธิบายและวิธีทำอย่างละเอียด:
-                      </span>
-                      <div className="whitespace-pre-line leading-loose text-slate-700 sm:pl-8 text-sm sm:text-base">{d.explanation}</div>
-                    </div>
-                  )}
-
-                </div>
-              ))}
-            </div>
-
-            <div className="pt-4 shrink-0 border-t border-slate-100">
               <button 
-                onClick={() => {
-                  setShowResultModal(false);
-                  navigate({ to: "/programs" });
-                }}
-                className="w-full py-4 bg-slate-800 hover:bg-slate-900 text-white rounded-xl font-bold transition shadow-md text-lg"
+                onClick={() => { setShowResultModal(false); navigate({ to: "/programs" }); }}
+                className="w-full py-4 mt-auto bg-slate-800 hover:bg-slate-900 text-white rounded-2xl font-bold transition shadow-md text-sm shrink-0"
               >
-                เสร็จสิ้น และกลับสู่หน้าหลัก
+                กลับสู่หน้าหลัก
               </button>
             </div>
+          </div>
+
+          {/* ➡️ ขวา: Slider เฉลยข้อสอบ (แบนราบ ใบเดียวใหญ่ๆ) พร้อมระบบลาก & สกรอลล์ */}
+          <div 
+            className="flex-1 relative flex items-center justify-center h-[65vh] lg:h-full p-4 lg:p-10 select-none z-10"
+            onMouseDown={handleDragStart}
+            onMouseUp={handleDragEnd}
+            onMouseLeave={(e) => { if(isDragging) handleDragEnd(e) }}
+            onTouchStart={handleDragStart}
+            onTouchEnd={handleDragEnd}
+            onWheel={handleWheel}
+          >
+             
+             {/* ปุ่มปิด (วางไว้นอกสุดมุมขวาบน) */}
+             <button 
+                onClick={() => { setShowResultModal(false); navigate({ to: "/programs" }); }} 
+                className="absolute right-4 top-4 lg:right-8 lg:top-8 p-3 bg-white/10 hover:bg-white/30 text-white rounded-full transition z-50 backdrop-blur-md border border-white/20"
+              >
+                <X className="size-6" />
+              </button>
+
+             {/* ปุ่มซ้ายขวา */}
+             <button 
+               onClick={() => setActiveResultCard(prev => Math.max(0, prev - 1))}
+               disabled={activeResultCard === 0}
+               className="absolute left-2 lg:left-8 z-50 p-3 sm:p-5 bg-white/10 hover:bg-white/30 backdrop-blur-md text-white rounded-full transition disabled:opacity-20 border border-white/20 shadow-xl"
+             >
+               <ChevronLeft className="size-6 sm:size-8" />
+             </button>
+
+             <button 
+               onClick={() => setActiveResultCard(prev => Math.min(examResult.details.length - 1, prev + 1))}
+               disabled={activeResultCard === examResult.details.length - 1}
+               className="absolute right-2 lg:right-8 z-50 p-3 sm:p-5 bg-white/10 hover:bg-white/30 backdrop-blur-md text-white rounded-full transition disabled:opacity-20 border border-white/20 shadow-xl"
+             >
+               <ChevronRight className="size-6 sm:size-8" />
+             </button>
+
+             {/* พื้นที่สไลด์การ์ดแบบแบนราบ */}
+             <div className="w-full h-full max-w-5xl relative flex items-center justify-center">
+                {examResult.details.map((d: any, index: number) => {
+                   const isCenter = index === activeResultCard;
+                   const isLeft = index < activeResultCard;
+                   const isRight = index > activeResultCard;
+
+                   // กำหนดตำแหน่งและสถานะของการ์ดแต่ละใบ
+                   let transform = "translateX(0%) scale(1)";
+                   let opacity = "opacity-100";
+                   let zIndex = "z-10";
+                   let pointerEvents = "pointer-events-auto";
+
+                   if (isLeft) {
+                     transform = "translateX(-120%) scale(0.9)";
+                     opacity = "opacity-0";
+                     zIndex = "z-0";
+                     pointerEvents = "pointer-events-none";
+                   } else if (isRight) {
+                     transform = "translateX(120%) scale(0.9)";
+                     opacity = "opacity-0";
+                     zIndex = "z-0";
+                     pointerEvents = "pointer-events-none";
+                   }
+
+                   return (
+                     <div 
+                       key={index}
+                       className={`absolute w-[95%] sm:w-[85%] lg:w-full h-[95%] lg:h-[85vh] bg-white rounded-3xl flex flex-col shadow-2xl transition-all duration-500 ease-in-out ${opacity} ${zIndex} ${pointerEvents}`}
+                       style={{ transform }}
+                     >
+                        {/* หัวการ์ดเฉลย */}
+                        <div className={`p-5 sm:p-6 lg:p-8 shrink-0 flex flex-col gap-3 rounded-t-3xl ${d.isCorrect ? "bg-emerald-50 border-b border-emerald-100" : "bg-red-50 border-b border-red-100"}`}>
+                           <div className="flex items-center justify-between">
+                             <span className="bg-slate-800 text-white text-xs font-bold px-4 py-1.5 rounded-full shadow-sm">
+                               ข้อ {index + 1} / {examResult.total}
+                             </span>
+                             {d.isCorrect ? (
+                                <span className="flex items-center gap-1.5 text-emerald-700 font-bold text-sm bg-emerald-200/50 px-4 py-1.5 rounded-full"><CheckCircle2 className="size-5" /> ถูกต้อง</span>
+                             ) : (
+                                <span className="flex items-center gap-1.5 text-rose-700 font-bold text-sm bg-rose-200/50 px-4 py-1.5 rounded-full"><XCircle className="size-5" /> ผิด</span>
+                             )}
+                           </div>
+                           <p className="font-bold text-base sm:text-lg lg:text-xl text-slate-800 leading-relaxed whitespace-pre-line select-text">
+                             {d.question}
+                           </p>
+                        </div>
+
+                        {/* เนื้อหาด้านในการ์ด (เลื่อน Scroll ได้) */}
+                        <div 
+                          className="flex-1 p-5 sm:p-8 lg:p-10 overflow-y-auto custom-scrollbar relative bg-slate-50/50"
+                          // 🛑 ป้องกันไม่ให้การ Scroll เมาส์ด้านใน หรือลากนิ้วอ่านเฉลย ไปเผลอเลื่อนเปลี่ยนข้อ
+                          onWheel={(e) => e.stopPropagation()} 
+                          onMouseDown={(e) => e.stopPropagation()} 
+                          onTouchStart={(e) => e.stopPropagation()} 
+                        >
+                           {questions[index]?.image_url && (
+                             <div className="mb-8 flex justify-center bg-white p-4 rounded-2xl border border-slate-100 shadow-sm">
+                               <img src={questions[index].image_url} alt="Question Graphic" className="max-h-64 object-contain rounded-xl select-none pointer-events-none" />
+                             </div>
+                           )}
+
+                           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 lg:gap-6 text-sm sm:text-base mb-8">
+                             <div className={`p-6 rounded-2xl border shadow-sm ${d.isCorrect ? "bg-emerald-100/40 border-emerald-200 text-emerald-900" : "bg-red-100/40 border-red-200 text-red-900"}`}>
+                               <p className="text-xs font-bold mb-2 opacity-60 uppercase tracking-wider">คำตอบที่คุณเลือก:</p>
+                               <p className="font-bold leading-relaxed text-lg">{d.userAnswer !== undefined && d.userAnswer !== "" ? 
+                                 (questions[index].type === "choice" ? questions[index].options[d.userAnswer] : d.userAnswer) 
+                                 : "ไม่ได้ตอบ"}</p>
+                             </div>
+                             {!d.isCorrect && (
+                               <div className="p-6 rounded-2xl border shadow-sm bg-emerald-50 border-emerald-200 text-emerald-900">
+                                 <p className="text-xs font-bold mb-2 opacity-60 uppercase tracking-wider">เฉลยที่ถูกต้อง:</p>
+                                 <p className="font-bold leading-relaxed text-lg">{d.correctAnswer}</p>
+                               </div>
+                             )}
+                           </div>
+
+                           {d.explanation && d.explanation !== "ไม่มีคำอธิบายเพิ่มเติม" && (
+                             <div className="p-6 sm:p-8 bg-white rounded-3xl border border-slate-200 shadow-sm">
+                               <span className="font-bold flex items-center gap-2 text-primary mb-5 text-lg">
+                                 <Lightbulb className="size-6" /> วิธีทำอย่างละเอียด:
+                               </span>
+                               <div className="whitespace-pre-line leading-loose text-slate-700 text-base lg:text-lg select-text">{d.explanation}</div>
+                             </div>
+                           )}
+                        </div>
+                     </div>
+                   );
+                })}
+             </div>
+             
+             {/* จุด Indicator ด้านล่าง (กดข้ามข้อได้) */}
+             <div className="absolute bottom-2 lg:bottom-6 left-1/2 -translate-x-1/2 flex items-center gap-2 z-50 bg-black/40 px-4 py-2.5 rounded-full backdrop-blur-md max-w-[80%] overflow-x-auto custom-scrollbar">
+                {examResult.details.map((_: any, i: number) => (
+                   <div 
+                     key={i} 
+                     onClick={() => setActiveResultCard(i)}
+                     className={`h-2.5 rounded-full transition-all cursor-pointer shrink-0 ${i === activeResultCard ? "w-10 bg-white" : "w-2.5 bg-white/40 hover:bg-white/80"}`}
+                   />
+                ))}
+             </div>
+
           </div>
         </div>
       )}

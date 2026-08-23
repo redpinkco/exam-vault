@@ -1,7 +1,7 @@
 import { Link, useNavigate } from "@tanstack/react-router";
 import { useEffect, useState, useRef } from "react";
 import logo from "@/assets/logo.png";
-import { UserCircle, LogOut, BarChart3, History, ChevronDown, User, Trophy } from "lucide-react";
+import { UserCircle, LogOut, BarChart3, History, ChevronDown, User, Trophy, LayoutDashboard } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 
 export function AppHeader() {
@@ -10,6 +10,8 @@ export function AppHeader() {
   const [isLoading, setIsLoading] = useState(true);
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
+
+  const ADMIN_EMAIL = "ttanasak@gmail.com";
 
   useEffect(() => {
     const fetchUser = async () => {
@@ -44,7 +46,6 @@ export function AppHeader() {
 
   return (
     <header className="sticky top-3 z-40 w-full px-4 sm:px-8 lg:px-12 transition-all">
-      {/* Floating Glass Dock Navbar ขยายเต็มความกว้างสวยงาม */}
       <div className="glass-dock squircle mx-auto w-full max-w-screen-2xl px-4 sm:px-8 h-16 flex items-center justify-between transition-all duration-300">
         
         {/* Brand Logo */}
@@ -60,7 +61,6 @@ export function AppHeader() {
 
         {/* Action Controls */}
         <div className="flex items-center gap-2.5">
-          {/* Top Scores Button */}
           <Link
             to={"/leaderboard" as any}
             className="flex items-center gap-1.5 px-4 py-2 rounded-2xl text-xs font-black text-amber-800 bg-gradient-to-b from-amber-100 to-amber-200/80 hover:from-amber-200 hover:to-amber-300 border border-amber-300/80 shadow-[0_2px_0_0_#d97706] active:translate-y-0.5 active:shadow-none transition-all"
@@ -86,7 +86,6 @@ export function AppHeader() {
                 <ChevronDown className={`size-3.5 text-slate-400 transition-transform duration-200 ${isDropdownOpen ? "rotate-180" : ""}`} />
               </button>
 
-              {/* Squircle Glass Dropdown */}
               {isDropdownOpen && (
                 <div className="absolute right-0 mt-3 w-60 origin-top-right rounded-3xl border border-white/90 bg-white/95 backdrop-blur-2xl p-2.5 shadow-[0_20px_40px_rgba(0,0,0,0.12)] ring-1 ring-black/5 animate-in fade-in zoom-in-95 duration-200">
                   <div className="px-3.5 py-2.5 mb-1.5 border-b border-slate-100">
@@ -95,6 +94,17 @@ export function AppHeader() {
                   </div>
 
                   <div className="flex flex-col gap-1">
+                    {user.email?.toLowerCase() === ADMIN_EMAIL && (
+                      <Link
+                        to="/admin"
+                        onClick={() => setIsDropdownOpen(false)}
+                        className="flex items-center gap-3 rounded-2xl px-3.5 py-2.5 text-xs font-bold bg-primary text-white hover:bg-primary/90 transition-colors shadow-sm mb-1"
+                      >
+                        <LayoutDashboard className="size-4" />
+                        ไปหน้าผู้ดูแลระบบ (Admin)
+                      </Link>
+                    )}
+
                     <Link
                       to={"/leaderboard" as any}
                       onClick={() => setIsDropdownOpen(false)}
@@ -114,12 +124,12 @@ export function AppHeader() {
                     </Link>
 
                     <Link
-                      to="/dashboard"
+                      to={"/history" as any}
                       onClick={() => setIsDropdownOpen(false)}
                       className="flex items-center gap-3 rounded-2xl px-3.5 py-2.5 text-xs font-bold text-slate-600 hover:bg-slate-50 hover:text-primary transition-colors"
                     >
                       <History className="size-4" />
-                      ประวัติการสอบ & คลังข้อผิด
+                      ประวัติการสอบ & แบบฝึกหัด
                     </Link>
                   </div>
 
@@ -145,7 +155,6 @@ export function AppHeader() {
             </Link>
           )}
         </div>
-
       </div>
     </header>
   );
