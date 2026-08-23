@@ -2,9 +2,8 @@ import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useState, useEffect, useRef } from "react";
 import { 
   ChevronLeft, ChevronRight, CheckCircle2, X, Award, Lightbulb, 
-  Check, XCircle, FileSearch, Eraser, Sparkles, Loader2, PenTool, 
-  TrendingUp, BarChart2, Timer, Bookmark, 
-  BotMessageSquare, Send, ArrowRightCircle, RotateCcw
+  Check, XCircle, FileSearch, Eraser, PenTool, 
+  TrendingUp, BarChart2, Timer, Bookmark, ArrowRightCircle, RotateCcw
 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import SignatureCanvas from 'react-signature-canvas';
@@ -20,157 +19,13 @@ const DB_PROGRAM_MAP: Record<string, string> = {
 };
 
 // ==========================================
-// 💡 คอมโพเนนต์ย่อย: AI Tutor สำหรับถามตอบเพิ่มเติม
-// ==========================================
-const AITutorChat = ({ questionData, userAnswer, correctAnswer }: { questionData: any, userAnswer: string, correctAnswer: string }) => {
-  const [isOpen, setIsOpen] = useState(false);
-  const [messages, setMessages] = useState<{role: "user" | "ai", text: string}[]>([]);
-  const [input, setInput] = useState("");
-  const [isTyping, setIsTyping] = useState(false);
-
-  const handleAskAI = async () => {
-    if (!input.trim()) return;
-    
-    const newMsg = { role: "user" as const, text: input };
-    setMessages(prev => [...prev, newMsg]);
-    setInput("");
-    setIsTyping(true);
-
-    try {
-      const contextPrompt = `คุณคือ "ครูผู้ช่วย AI ประจำคลังสอบ" หน้าที่ของคุณคืออธิบายวิธีคิดให้เด็กนักเรียนอย่างใจดี เป็นกันเอง และเข้าใจง่าย
-      
-      ข้อมูลโจทย์ข้อนี้:
-      โจทย์: ${questionData.question}
-      ตัวเลือกที่มี: ${(questionData.options || []).join(", ")}
-      คำตอบที่นักเรียนตอบมา: ${userAnswer || "ไม่ได้ตอบ"}
-      คำตอบที่ถูกต้องคือ: ${correctAnswer}
-      เฉลยเดิมที่มีในระบบ: ${questionData.explanation || "ไม่มี"}
-      
-      คำถามจากนักเรียน: ${newMsg.text}
-      
-      กรุณาตอบคำถามนักเรียนโดยใช้ภาษาที่อ่านง่าย ไม่วิชาการเกินไป และให้กำลังใจนักเรียนด้วย`;
-
-      const response = await fetch(`/api/gemini`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          model: "gemini-2.5-flash",
-          contents: [{ parts: [{ text: contextPrompt }] }]
-        })
-      });
-
-      const data = await response.json();
-      const aiResponseText = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || "ขออภัยครับ ครู AI กำลังมึนงงเล็กน้อย ลองถามใหม่อีกครั้งนะครับ";
-      
-      setMessages(prev => [...prev, { role: "ai", text: aiResponseText }]);
-    } catch (error) {
-      setMessages(prev => [...prev, { role: "ai", text: "เกิดข้อผิดพลาดในการเชื่อมต่อระบบ ลองใหม่อีกครั้งนะครับ" }]);
-    } finally {
-      setIsTyping(false);
-    }
-  };
-
-  if (!isOpen) {
-    return (
-      <button 
-        onClick={() => setIsOpen(true)}
-        className="mt-3 w-full py-3 rounded-xl border border-indigo-200 bg-indigo-50 text-indigo-700 font-bold text-sm flex items-center justify-center gap-2 hover:bg-indigo-100 transition shadow-sm"
-      >
-        <BotMessageSquare className="size-4" /> ถาม AI อธิบายข้อนี้ให้ฟังเพิ่มเติม
-      </button>
-    );
-  }
-
-  return (
-    <div className="mt-4 border border-indigo-200 bg-indigo-50/30 rounded-xl overflow-hidden shadow-inner">
-      <div className="bg-indigo-100 p-3 flex justify-between items-center border-b border-indigo-200">
-        <span className="font-bold text-indigo-800 text-xs flex items-center gap-1.5"><Sparkles className="size-4" /> ครูผู้ช่วย AI (Tutor Mode)</span>
-        <button onClick={() => setIsOpen(false)} className="text-indigo-500 hover:text-indigo-800"><X className="size-4" /></button>
-      </div>
-      
-      <div className="p-4 space-y-3 max-h-60 overflow-y-auto custom-scrollbar">
-        <div className="bg-white border border-indigo-100 p-3 rounded-xl rounded-tl-none text-xs text-slate-700 inline-block max-w-[90%] shadow-sm">
-          สวัสดีครับ! มีจุดไหนของข้อนี้ที่อ่านเฉลยแล้วยังไม่เข้าใจ พิมพ์ถามครูได้เลยครับ 👇
-        </div>
-        
-        {messages.map((m, i) => (
-          <div key={i} className={`flex ${m.role === "user" ? "justify-end" : "justify-start"}`}>
-            <div className={`p-3 rounded-xl text-xs max-w-[90%] shadow-sm ${m.role === "user" ? "bg-primary text-white rounded-tr-none" : "bg-white border border-indigo-100 text-slate-700 rounded-tl-none"}`}>
-              <p className="whitespace-pre-line leading-relaxed">{m.text}</p>
-            </div>
-          </div>
-        ))}
-
-        {isTyping && (
-          <div className="bg-white border border-indigo-100 p-3 rounded-xl rounded-tl-none text-xs text-slate-500 w-fit shadow-sm flex items-center gap-2">
-            <Loader2 className="size-3.5 animate-spin" /> ครูกำลังพิมพ์คำอธิบาย...
-          </div>
-        )}
-      </div>
-
-      <div className="p-3 bg-white border-t flex gap-2">
-        <input 
-          type="text" 
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && handleAskAI()}
-          placeholder="พิมพ์คำถามของคุณที่นี่..."
-          className="flex-1 p-2.5 rounded-lg border bg-slate-50 text-xs outline-none focus:border-indigo-400"
-        />
-        <button 
-          onClick={handleAskAI}
-          disabled={!input.trim() || isTyping}
-          className="p-2.5 bg-indigo-600 text-white rounded-lg disabled:opacity-50 hover:bg-indigo-700 transition shadow-sm"
-        >
-          <Send className="size-4" />
-        </button>
-      </div>
-    </div>
-  );
-};
-
-// ==========================================
-// 💡 คอมโพเนนต์ย่อย: กระดานเขียนคำตอบข้อสอบอัตนัย
+// 💡 คอมโพเนนต์ย่อย: กระดานทดเลข (ลบระบบ AI อ่านลายมือออกแล้ว)
 // ==========================================
 const SubjectiveCanvas = ({ answer, onUpdate }: { answer: string; onUpdate: (val: string) => void }) => {
   const sigCanvas = useRef<any>(null);
-  const [isChecking, setIsChecking] = useState(false);
 
   const handleClear = () => {
     sigCanvas.current?.clear();
-    onUpdate("");
-  };
-
-  const handleCheckHandwriting = async () => {
-    if (sigCanvas.current?.isEmpty()) return;
-    setIsChecking(true);
-
-    try {
-      const imageBase64 = sigCanvas.current?.getTrimmedCanvas().toDataURL("image/jpeg", 0.9).split(",")[1];
-      
-      const prompt = `อ่านลายมือในรูปภาพนี้ (อาจจะเป็นตัวเลข, ภาษาอังกฤษ หรือภาษาไทย) ตอบกลับมาเฉพาะคำหรือตัวเลขที่อ่านได้อย่างแม่นยำที่สุด ห้ามมีคำอธิบายเพิ่มเติม หากอ่านไม่ออกให้ตอบว่า '-'`;
-
-      const response = await fetch(`/api/gemini`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          model: "gemini-2.5-flash",
-          contents: [{ parts: [{ text: prompt }, { inline_data: { mime_type: "image/jpeg", data: imageBase64 } }] }]
-        })
-      });
-
-      const data = await response.json();
-      const text = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || "";
-      
-      if (text !== "-") {
-        onUpdate(text);
-      }
-    } catch (error) {
-      console.error("AI Error:", error);
-      alert("ไม่สามารถเชื่อมต่อระบบอ่านลายมือได้ กรุณาพิมพ์คำตอบลงในช่องแทน");
-    } finally {
-      setIsChecking(false);
-    }
   };
 
   return (
@@ -178,7 +33,7 @@ const SubjectiveCanvas = ({ answer, onUpdate }: { answer: string; onUpdate: (val
       <div className="bg-amber-50/60 p-4 sm:p-5 rounded-2xl border border-amber-200 shadow-sm">
         <div className="flex items-center justify-between mb-3">
           <label className="text-sm font-bold text-amber-900 flex items-center gap-2">
-            <PenTool className="size-4 text-amber-600" /> พื้นที่ทดเลข / เขียนคำตอบ
+            <PenTool className="size-4 text-amber-600" /> พื้นที่ทดเลข (กระดาษทด)
           </label>
         </div>
         
@@ -203,28 +58,20 @@ const SubjectiveCanvas = ({ answer, onUpdate }: { answer: string; onUpdate: (val
             onClick={handleClear} 
             className="flex-1 py-2.5 rounded-xl border border-amber-300 text-amber-700 bg-white hover:bg-amber-100 flex items-center justify-center gap-2 text-sm font-bold transition-colors"
           >
-            <Eraser className="size-4" /> ลบกระดาน
-          </button>
-          <button 
-            onClick={handleCheckHandwriting} 
-            disabled={isChecking} 
-            className="flex-1 py-2.5 rounded-xl bg-amber-500 text-white hover:bg-amber-600 flex items-center justify-center gap-2 text-sm font-bold transition-colors disabled:opacity-50 shadow-sm"
-          >
-            {isChecking ? <Loader2 className="size-4 animate-spin" /> : <Sparkles className="size-4" />}
-            ดึงคำตอบลงช่อง
+            <Eraser className="size-4" /> ลบกระดานทด
           </button>
         </div>
       </div>
 
       <div>
         <label className="text-xs font-semibold text-slate-500 mb-1.5 block">
-          คำตอบที่ระบบบันทึก (สามารถใช้นิ้วพิมพ์แก้ไขได้ หาก AI อ่านผิด)
+          พิมพ์คำตอบของคุณที่นี่ (ระบบจะตรวจจากช่องนี้)
         </label>
         <input
           type="text"
           value={answer}
           onChange={(e) => onUpdate(e.target.value)}
-          placeholder="กดปุ่ม 'ดึงคำตอบลงช่อง' หรือพิมพ์ข้อความที่นี่..."
+          placeholder="พิมพ์ข้อความ หรือตัวเลขคำตอบที่นี่..."
           className="w-full p-4 border-2 border-slate-200 rounded-xl bg-slate-50 focus:bg-white focus:ring-2 focus:ring-primary focus:border-primary outline-none text-base font-bold transition-all text-primary"
         />
       </div>
@@ -632,7 +479,7 @@ function ExamSessionPage() {
 
             {currentQ?.image_url && (
               <div className="mb-6 flex justify-center">
-                <img src={currentQ.image_url} alt="Question Graphic" className="max-h-64 object-contain rounded-xl border p-2 bg-slate-50" />
+                <img src={currentQ.image_url} alt="Question Graphic" className="max-h-80 object-contain rounded-xl border p-2 bg-slate-50 shadow-sm" />
               </div>
             )}
 
@@ -764,17 +611,17 @@ function ExamSessionPage() {
         </div>
       </div>
 
-      {/* POPUP RESULT พร้อมสถิติ Percentile และ AI Tutor */}
+      {/* ✅ POPUP RESULT (แสดงผลลัพธ์) */}
       {showResultModal && examResult && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
-          <div className="bg-white rounded-[2rem] w-full max-w-3xl max-h-[90vh] flex flex-col p-6 sm:p-8 shadow-2xl animate-in zoom-in-95">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-2 sm:p-4">
+          <div className="bg-white rounded-[2rem] w-full max-w-5xl h-[95vh] flex flex-col p-4 sm:p-8 shadow-2xl animate-in zoom-in-95">
             
             <div className="text-center pb-6 border-b border-slate-100 relative shrink-0">
-              <button onClick={() => setShowResultModal(false)} className="absolute right-0 top-0 p-2 text-slate-400 hover:bg-slate-100 rounded-full transition"><X className="size-5"/></button>
-              <Award className="size-14 text-amber-500 mx-auto mb-2" />
-              <h2 className="text-2xl font-bold text-slate-800">สรุปผลการทดสอบ</h2>
-              <div className="flex items-center justify-center gap-2 mt-0.5">
-                <p className="text-xs sm:text-sm font-medium text-slate-500">{examData.title}</p>
+              <button onClick={() => setShowResultModal(false)} className="absolute right-0 top-0 p-2 text-slate-400 hover:bg-slate-100 rounded-full transition"><X className="size-6"/></button>
+              <Award className="size-16 text-amber-500 mx-auto mb-2" />
+              <h2 className="text-2xl sm:text-3xl font-bold text-slate-800">สรุปผลการทดสอบ</h2>
+              <div className="flex items-center justify-center gap-2 mt-1">
+                <p className="text-sm sm:text-base font-medium text-slate-500">{examData.title}</p>
                 {attemptCount > 1 && (
                   <span className="text-xs bg-amber-100 text-amber-800 font-bold px-2 py-0.5 rounded-md">
                     รอบที่ {attemptCount} (ฝึกซ้ำ)
@@ -782,53 +629,53 @@ function ExamSessionPage() {
                 )}
               </div>
               
-              <div className="mt-4 flex flex-wrap items-center justify-center gap-3">
-                <div className="inline-flex items-center justify-center gap-2 bg-amber-50 border border-amber-200 px-6 py-3 rounded-2xl shadow-sm">
-                  <span className="text-4xl font-extrabold text-amber-600">{examResult.score}</span>
-                  <span className="text-lg font-medium text-amber-600/50">/</span>
-                  <span className="text-xl font-bold text-amber-700">{examResult.total}</span>
-                  <span className="ml-2 text-sm font-bold text-amber-800 bg-amber-200/60 px-2.5 py-0.5 rounded-lg">({examResult.percentage}%)</span>
+              <div className="mt-5 flex flex-wrap items-center justify-center gap-4">
+                <div className="inline-flex items-center justify-center gap-2 bg-amber-50 border border-amber-200 px-6 py-4 rounded-2xl shadow-sm">
+                  <span className="text-5xl font-extrabold text-amber-600">{examResult.score}</span>
+                  <span className="text-xl font-medium text-amber-600/50">/</span>
+                  <span className="text-2xl font-bold text-amber-700">{examResult.total}</span>
+                  <span className="ml-2 text-base font-bold text-amber-800 bg-amber-200/60 px-3 py-1 rounded-lg">({examResult.percentage}%)</span>
                 </div>
 
                 {statsData && (
-                  <div className="inline-flex items-center gap-2 bg-indigo-50 border border-indigo-200 px-4 py-3 rounded-2xl shadow-sm text-left">
-                    <TrendingUp className="size-6 text-indigo-600" />
+                  <div className="inline-flex items-center gap-3 bg-indigo-50 border border-indigo-200 px-5 py-4 rounded-2xl shadow-sm text-left">
+                    <TrendingUp className="size-8 text-indigo-600" />
                     <div>
-                      <p className="text-[10px] font-bold uppercase tracking-wider text-indigo-500">Percentile Rank</p>
-                      <p className="text-sm font-black text-indigo-900">ชนะผู้สอบ {statsData.percentile}%</p>
+                      <p className="text-xs font-bold uppercase tracking-wider text-indigo-500">Percentile Rank</p>
+                      <p className="text-base font-black text-indigo-900">ชนะผู้สอบ {statsData.percentile}%</p>
                     </div>
                   </div>
                 )}
               </div>
 
               {statsData && (
-                <div className="mt-4 max-w-xl mx-auto bg-slate-50 border border-slate-200/80 rounded-2xl p-4 text-left">
-                  <div className="flex items-center justify-between text-xs font-bold text-slate-600 mb-2">
-                    <span className="flex items-center gap-1.5"><BarChart2 className="size-4 text-primary" /> เปรียบเทียบคะแนนเฉลี่ย</span>
-                    <span className="text-indigo-600 bg-indigo-100/70 px-2 py-0.5 rounded-md font-semibold">{statsData.rankText}</span>
+                <div className="mt-5 max-w-2xl mx-auto bg-slate-50 border border-slate-200/80 rounded-2xl p-5 text-left">
+                  <div className="flex items-center justify-between text-sm font-bold text-slate-600 mb-3">
+                    <span className="flex items-center gap-1.5"><BarChart2 className="size-5 text-primary" /> เปรียบเทียบคะแนนเฉลี่ย</span>
+                    <span className="text-indigo-600 bg-indigo-100/70 px-3 py-1 rounded-lg font-semibold">{statsData.rankText}</span>
                   </div>
 
-                  <div className="grid grid-cols-3 gap-2 text-center text-xs mb-3">
-                    <div className="bg-white p-2 rounded-xl border">
-                      <p className="text-slate-400 text-[10px]">ผู้ทำข้อสอบชุดนี้</p>
-                      <p className="font-bold text-slate-700">{statsData.totalTakers} คน</p>
+                  <div className="grid grid-cols-3 gap-3 text-center text-sm mb-4">
+                    <div className="bg-white p-3 rounded-xl border shadow-sm">
+                      <p className="text-slate-400 text-xs mb-1">ผู้ทำข้อสอบชุดนี้</p>
+                      <p className="font-bold text-slate-700 text-base">{statsData.totalTakers} คน</p>
                     </div>
-                    <div className="bg-white p-2 rounded-xl border">
-                      <p className="text-slate-400 text-[10px]">คะแนนเฉลี่ยระบบ</p>
-                      <p className="font-bold text-slate-700">{statsData.avgScore}%</p>
+                    <div className="bg-white p-3 rounded-xl border shadow-sm">
+                      <p className="text-slate-400 text-xs mb-1">คะแนนเฉลี่ยระบบ</p>
+                      <p className="font-bold text-slate-700 text-base">{statsData.avgScore}%</p>
                     </div>
-                    <div className="bg-white p-2 rounded-xl border">
-                      <p className="text-slate-400 text-[10px]">คะแนนสูงสุด</p>
-                      <p className="font-bold text-emerald-600">{statsData.maxScore}%</p>
+                    <div className="bg-white p-3 rounded-xl border shadow-sm">
+                      <p className="text-slate-400 text-xs mb-1">คะแนนสูงสุด</p>
+                      <p className="font-bold text-emerald-600 text-base">{statsData.maxScore}%</p>
                     </div>
                   </div>
 
-                  <div className="space-y-1.5 text-xs">
+                  <div className="space-y-2 text-sm">
                     <div className="flex justify-between font-semibold text-slate-600">
                       <span>คะแนนของคุณ:</span>
-                      <span className="font-bold text-primary">{examResult.percentage}%</span>
+                      <span className="font-bold text-primary text-base">{examResult.percentage}%</span>
                     </div>
-                    <div className="w-full bg-slate-200 h-2.5 rounded-full overflow-hidden flex">
+                    <div className="w-full bg-slate-200 h-3 rounded-full overflow-hidden flex">
                       <div 
                         className="bg-primary h-full rounded-full transition-all duration-1000" 
                         style={{ width: `${Math.min(100, examResult.percentage)}%` }}
@@ -839,71 +686,64 @@ function ExamSessionPage() {
               )}
             </div>
 
-            {/* รายละเอียดข้อถูก-ผิด + เฉลย + 💡 AI Tutor */}
-            <div className="flex-1 overflow-y-auto space-y-5 my-6 pr-2 custom-scrollbar">
+            {/* ส่วนแสดงรายข้อ (ลบกล่องถาม AI ออก) */}
+            <div className="flex-1 overflow-y-auto space-y-6 my-6 pr-2 custom-scrollbar">
               {examResult.details.map((d: any, index: number) => (
-                <div key={index} className={`p-5 sm:p-6 rounded-2xl border ${d.isCorrect ? "bg-emerald-50/50 border-emerald-200" : "bg-red-50/50 border-red-200"}`}>
-                  <div className="flex items-start justify-between gap-4">
-                    <p className="font-semibold text-sm sm:text-base text-slate-800 leading-relaxed">
+                <div key={index} className={`p-6 sm:p-8 rounded-3xl border shadow-sm ${d.isCorrect ? "bg-emerald-50/30 border-emerald-200" : "bg-red-50/30 border-red-200"}`}>
+                  <div className="flex items-start justify-between gap-6">
+                    <p className="font-bold text-base sm:text-lg text-slate-800 leading-relaxed whitespace-pre-line">
                       ข้อ {index + 1}. {d.question}
                     </p>
-                    <div className="shrink-0 mt-0.5">
+                    <div className="shrink-0 mt-1">
                       {d.isCorrect ? (
-                        <span className="flex items-center gap-1.5 text-emerald-700 font-bold text-xs sm:text-sm bg-emerald-100 px-3 py-1.5 rounded-xl border border-emerald-200"><CheckCircle2 className="size-4" /> ถูกต้อง</span>
+                        <span className="flex items-center gap-1.5 text-emerald-700 font-bold text-sm bg-emerald-100 px-4 py-2 rounded-xl border border-emerald-200"><CheckCircle2 className="size-5" /> ถูกต้อง</span>
                       ) : (
-                        <span className="flex items-center gap-1.5 text-red-700 font-bold text-xs sm:text-sm bg-red-100 px-3 py-1.5 rounded-xl border border-red-200"><XCircle className="size-4" /> ผิด</span>
+                        <span className="flex items-center gap-1.5 text-red-700 font-bold text-sm bg-red-100 px-4 py-2 rounded-xl border border-red-200"><XCircle className="size-5" /> ผิด</span>
                       )}
                     </div>
                   </div>
 
                   {questions[index].image_url && (
-                    <div className="mt-4 mb-2 flex justify-start">
-                      <img src={questions[index].image_url} alt="Question Graphic" className="max-h-40 object-contain rounded-lg border bg-white p-1" />
+                    <div className="mt-5 mb-5 flex justify-start">
+                      <img src={questions[index].image_url} alt="Question Graphic" className="max-h-80 object-contain rounded-xl border bg-white p-2 shadow-sm" />
                     </div>
                   )}
 
-                  <div className="mt-5 grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
-                    <div className={`p-3.5 rounded-xl border ${d.isCorrect ? "bg-emerald-100/50 border-emerald-200 text-emerald-900" : "bg-red-100/50 border-red-200 text-red-900"}`}>
-                      <p className="text-[11px] font-semibold mb-1.5 opacity-70">คำตอบที่คุณเลือก:</p>
+                  <div className="mt-6 grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm sm:text-base">
+                    <div className={`p-4 sm:p-5 rounded-2xl border ${d.isCorrect ? "bg-emerald-100/50 border-emerald-300 text-emerald-900" : "bg-red-100/50 border-red-300 text-red-900"}`}>
+                      <p className="text-xs sm:text-sm font-semibold mb-2 opacity-70">คำตอบที่คุณเลือก:</p>
                       <p className="font-bold">{d.userAnswer !== undefined && d.userAnswer !== "" ? 
                         (questions[index].type === "choice" ? questions[index].options[d.userAnswer] : d.userAnswer) 
                         : "ไม่ได้ตอบ"}</p>
                     </div>
                     {!d.isCorrect && (
-                      <div className="p-3.5 rounded-xl border bg-emerald-50 border-emerald-200 text-emerald-900">
-                        <p className="text-[11px] font-semibold mb-1.5 opacity-70">เฉลยคำตอบที่ถูกต้อง:</p>
+                      <div className="p-4 sm:p-5 rounded-2xl border bg-emerald-50 border-emerald-300 text-emerald-900">
+                        <p className="text-xs sm:text-sm font-semibold mb-2 opacity-70">เฉลยคำตอบที่ถูกต้อง:</p>
                         <p className="font-bold">{d.correctAnswer}</p>
                       </div>
                     )}
                   </div>
 
                   {d.explanation && d.explanation !== "ไม่มีคำอธิบายเพิ่มเติม" && (
-                    <div className="mt-4 p-4 sm:p-5 bg-white rounded-xl border border-slate-200 shadow-sm text-sm text-slate-700">
-                      <span className="font-bold flex items-center gap-1.5 text-amber-600 mb-2.5">
-                        <Lightbulb className="size-4" /> คำอธิบายและวิธีทำอย่างละเอียด:
+                    <div className="mt-6 p-5 sm:p-7 bg-white rounded-2xl border border-slate-200 shadow-sm w-full">
+                      <span className="font-bold flex items-center gap-2 text-amber-600 mb-4 text-base sm:text-lg">
+                        <Lightbulb className="size-5 sm:size-6" /> คำอธิบายและวิธีทำอย่างละเอียด:
                       </span>
-                      <p className="whitespace-pre-line leading-relaxed text-slate-600 sm:pl-5">{d.explanation}</p>
+                      <div className="whitespace-pre-line leading-loose text-slate-700 sm:pl-8 text-sm sm:text-base">{d.explanation}</div>
                     </div>
                   )}
-
-                  {/* 💡 คอมโพเนนต์ AI Tutor แบบฝังรายข้อ */}
-                  <AITutorChat 
-                    questionData={questions[index]} 
-                    userAnswer={d.userAnswer !== undefined && d.userAnswer !== "" ? (questions[index].type === "choice" ? questions[index].options[d.userAnswer] : d.userAnswer) : "ไม่ได้ตอบ"} 
-                    correctAnswer={d.correctAnswer} 
-                  />
 
                 </div>
               ))}
             </div>
 
-            <div className="pt-2 shrink-0">
+            <div className="pt-4 shrink-0 border-t border-slate-100">
               <button 
                 onClick={() => {
                   setShowResultModal(false);
                   navigate({ to: "/programs" });
                 }}
-                className="w-full py-4 bg-slate-800 hover:bg-slate-900 text-white rounded-xl font-bold transition shadow-md text-base"
+                className="w-full py-4 bg-slate-800 hover:bg-slate-900 text-white rounded-xl font-bold transition shadow-md text-lg"
               >
                 เสร็จสิ้น และกลับสู่หน้าหลัก
               </button>

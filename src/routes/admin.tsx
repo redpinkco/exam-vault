@@ -11,12 +11,13 @@ import {
 import { supabase } from "@/lib/supabase";
 import { Document, Packer, Paragraph, TextRun, HeadingLevel, AlignmentType } from "docx";
 import { saveAs } from "file-saver";
+import imageCompression from "browser-image-compression";
+import Papa from "papaparse";
 
 export const Route = createFileRoute("/admin")({
   component: AdminDashboard,
 });
 
-// ✅ แก้ไข: เหลือแค่ ttanasak@gmail.com เป็น Admin คนเดียว
 const ADMIN_EMAILS = [
   "ttanasak@gmail.com"
 ];
@@ -46,12 +47,13 @@ function AdminDashboard() {
   const [isAuthChecking, setIsAuthChecking] = useState(true);
   const [activeTab, setActiveTab] = useState<"dashboard" | "lessons" | "exams" | "users" | "worksheets" | "codes">("exams");
 
-  // --- States ---
   const [students, setStudents] = useState<any[]>([]);
   const [selectedStudent, setSelectedStudent] = useState<any>(null);
   const [showStudentModal, setShowStudentModal] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [formData, setFormData] = useState({ id: 0, name: "", email: "", password: "", phone: "", permissions: defaultPermissions });
+  
+  const [isImporting, setIsImporting] = useState(false);
 
   const [lessons, setLessons] = useState<any[]>([]);
   const [showLessonModal, setShowLessonModal] = useState(false);
@@ -73,6 +75,9 @@ function AdminDashboard() {
   ]);
   
   const [generatingExpId, setGeneratingExpId] = useState<number | null>(null);
+  
+  // ✅ State สำหรับสแกนเฉพาะข้อ
+  const [scanningQIndex, setScanningQIndex] = useState<number | null>(null);
 
   const [previewImages, setPreviewImages] = useState<string[]>([]);
   const [isAiProcessing, setIsAiProcessing] = useState(false);
@@ -85,13 +90,12 @@ function AdminDashboard() {
   });
   const [isUploading, setIsUploading] = useState(false);
 
-  // Activation Codes State
   const [accessCodes, setAccessCodes] = useState<any[]>([]);
   const [newCodeName, setNewCodeName] = useState("");
   const [newCodePerms, setNewCodePerms] = useState(defaultPermissions);
 
-  const [filterGrade, setFilterGrade] = useState("ป.6");
-  const [filterProgram, setFilterProgram] = useState("ISM");
+  const [filterGrade, setFilterGrade] = useState("ทั้งหมด");
+  const [filterProgram, setFilterProgram] = useState("ทั้งหมด");
   const [filterSubject, setFilterSubject] = useState("ทั้งหมด");
 
   useEffect(() => {
@@ -105,14 +109,12 @@ function AdminDashboard() {
 
       const currentEmail = session.user.email.toLowerCase().trim();
 
-      // ✅ ป้องกันผู้ใช้ทั่วไปเข้าหน้า Admin
       if (!ADMIN_EMAILS.includes(currentEmail)) {
         alert("⚠️ คุณไม่มีสิทธิ์เข้าถึงหน้านี้");
         navigate({ to: "/" });
         return;
       }
 
-      // ดึงข้อมูลทั้งหมดหลังยืนยัน Session เรียบร้อย
       await Promise.all([
         fetchStudents(),
         fetchExams(),
@@ -169,196 +171,130 @@ function AdminDashboard() {
   };
 
   const uploadImageToStorage = async (file: File, folderName: string): Promise<string> => {
-    const fileExt = file.name.split('.').pop();
-    const fileName = `${folderName}/${Math.random().toString(36).substring(2, 15)}_${Date.now()}.${fileExt}`;
-    
-    const { error } = await supabase.storage
-      .from('exam-vault-images')
-      .upload(fileName, file, { 
-        cacheControl: '3600', 
-        upsert: false,
-        contentType: file.type || 'image/jpeg'
-      });
+    const options = { maxSizeMB: 0.5, maxWidthOrHeight: 1200, useWebWorker: true, fileType: "image/jpeg" };
+    let processedFile = file;
+    try { processedFile = await imageCompression(file, options); } 
+    catch (error) { console.warn("การบีบอัดล้มเหลว จะใช้ไฟล์ต้นฉบับแทน:", error); }
 
+    const fileName = `${folderName}/${Math.random().toString(36).substring(2, 15)}_${Date.now()}.jpg`;
+    const { error } = await supabase.storage.from('exam-vault-images').upload(fileName, processedFile, { cacheControl: '3600', upsert: false, contentType: 'image/jpeg' });
     if (error) throw error;
-    
     const { data: { publicUrl } } = supabase.storage.from('exam-vault-images').getPublicUrl(fileName);
     return publicUrl;
   };
 
-  // --- Export MS Word Handler ---
   const handleExportWord = async (exam: any, includeSolutions: boolean = false) => {
     const questions: QuestionItem[] = Array.isArray(exam.questions) ? exam.questions : [];
     const choicePrefixes = ["ก.", "ข.", "ค.", "ง.", "จ."];
 
     const docChildren: Paragraph[] = [
+      new Paragraph({ text: exam.title || "ชุดข้อสอบ", heading: HeadingLevel.TITLE, alignment: AlignmentType.CENTER, spacing: { after: 120 } }),
       new Paragraph({
-        text: exam.title || "ชุดข้อสอบ",
-        heading: HeadingLevel.TITLE,
-        alignment: AlignmentType.CENTER,
-        spacing: { after: 120 }
-      }),
-      new Paragraph({
-        alignment: AlignmentType.CENTER,
-        spacing: { after: 300 },
+        alignment: AlignmentType.CENTER, spacing: { after: 300 },
         children: [
           new TextRun({ text: `ระดับชั้น: ${safeGetArray(exam.grade).join(", ")}  |  `, bold: true }),
           new TextRun({ text: `แผนการเรียน: ${safeGetArray(exam.program).join(", ")}  |  `, bold: true }),
           new TextRun({ text: `วิชา: ${exam.subject}  |  ปีการศึกษา: ${exam.year || "-"}`, bold: true }),
         ]
       }),
-      new Paragraph({
-        text: includeSolutions ? "--- เฉลยคำตอบและคำอธิบายวิธีทำละเอียด ---" : "ชื่อ-นามสกุล: ............................................................................ เลขที่: ............ ห้อง: ............",
-        spacing: { after: 300 }
-      })
+      new Paragraph({ text: includeSolutions ? "--- เฉลยคำตอบและคำอธิบายวิธีทำละเอียด ---" : "ชื่อ-นามสกุล: ............................................................................ เลขที่: ............ ห้อง: ............", spacing: { after: 300 } })
     ];
 
     questions.forEach((q, idx) => {
-      docChildren.push(
-        new Paragraph({
-          spacing: { before: 200, after: 100 },
-          children: [
-            new TextRun({ text: `ข้อที่ ${idx + 1}. `, bold: true }),
-            new TextRun({ text: q.question || "" })
-          ]
-        })
-      );
-
+      docChildren.push(new Paragraph({ spacing: { before: 200, after: 100 }, children: [ new TextRun({ text: `ข้อที่ ${idx + 1}. `, bold: true }), new TextRun({ text: q.question || "" }) ] }));
       if (q.type === "choice" && q.options) {
         q.options.forEach((opt, optIdx) => {
           const isCorrect = optIdx === q.correct_index;
-          docChildren.push(
-            new Paragraph({
-              spacing: { before: 40, after: 40 },
-              indent: { left: 400 },
-              children: [
-                new TextRun({ text: `${choicePrefixes[optIdx] || `${optIdx + 1}.`} ${opt}` }),
-                ...(includeSolutions && isCorrect ? [new TextRun({ text: "  ✓ (คำตอบที่ถูกต้อง)", bold: true, color: "008800" })] : [])
-              ]
-            })
-          );
+          docChildren.push(new Paragraph({
+            spacing: { before: 40, after: 40 }, indent: { left: 400 },
+            children: [ new TextRun({ text: `${choicePrefixes[optIdx] || `${optIdx + 1}.`} ${opt}` }), ...(includeSolutions && isCorrect ? [new TextRun({ text: "  ✓ (คำตอบที่ถูกต้อง)", bold: true, color: "008800" })] : []) ]
+          }));
         });
       } else {
         if (includeSolutions) {
-          docChildren.push(
-            new Paragraph({
-              spacing: { before: 60, after: 60 },
-              indent: { left: 400 },
-              children: [
-                new TextRun({ text: `คำตอบที่ถูกต้อง: ${(q.subjective_answers || []).join(" หรือ ")}`, bold: true, color: "008800" })
-              ]
-            })
-          );
+          docChildren.push(new Paragraph({ spacing: { before: 60, after: 60 }, indent: { left: 400 }, children: [ new TextRun({ text: `คำตอบที่ถูกต้อง: ${(q.subjective_answers || []).join(" หรือ ")}`, bold: true, color: "008800" }) ] }));
         } else {
-          docChildren.push(
-            new Paragraph({
-              spacing: { before: 80, after: 80 },
-              indent: { left: 400 },
-              text: "ตอบ: ...................................................................................................................................."
-            })
-          );
+          docChildren.push(new Paragraph({ spacing: { before: 80, after: 80 }, indent: { left: 400 }, text: "ตอบ: ...................................................................................................................................." }));
         }
       }
-
       if (includeSolutions && q.explanation) {
-        docChildren.push(
-          new Paragraph({
-            spacing: { before: 100, after: 160 },
-            indent: { left: 400 },
-            children: [
-              new TextRun({ text: "วิธีทำและคำอธิบาย: ", bold: true, color: "555555" }),
-              new TextRun({ text: q.explanation, color: "555555" })
-            ]
-          })
-        );
+        docChildren.push(new Paragraph({ spacing: { before: 100, after: 160 }, indent: { left: 400 }, children: [ new TextRun({ text: "วิธีทำและคำอธิบาย: ", bold: true, color: "555555" }), new TextRun({ text: q.explanation, color: "555555" }) ] }));
       }
     });
 
-    const doc = new Document({
-      sections: [{ properties: {}, children: docChildren }]
-    });
-
+    const doc = new Document({ sections: [{ properties: {}, children: docChildren }] });
     const blob = await Packer.toBlob(doc);
     saveAs(blob, `${exam.title || "Exam"}_${includeSolutions ? "เฉลย" : "ชุดข้อสอบ"}.docx`);
   };
 
-  // --- Export CSV Handler ---
   const handleExportCSV = () => {
     if (students.length === 0) return alert("ไม่มีข้อมูลนักเรียนให้ส่งออก");
-
     const headers = ["ID", "ชื่อ-นามสกุล", "อีเมล", "เบอร์โทร", "คะแนนเฉลี่ยคณิต", "คะแนนเฉลี่ยวิทย์", "คะแนนเฉลี่ยอังกฤษ", "จำนวนข้อสอบที่ทำ"];
     const rows = students.map(s => [
-      s.id,
-      `"${s.name || ""}"`,
-      `"${s.email || ""}"`,
-      `"${s.phone || ""}"`,
-      s.scores?.math || 0,
-      s.scores?.science || 0,
-      s.scores?.english || 0,
-      (s.examHistory || []).length
+      s.id, `"${s.name || ""}"`, `"${s.email || ""}"`, `"${s.phone || ""}"`,
+      s.scores?.math || 0, s.scores?.science || 0, s.scores?.english || 0, (s.examHistory || []).length
     ]);
-
     const csvContent = "data:text/csv;charset=utf-8,\uFEFF" + [headers.join(","), ...rows.map(e => e.join(","))].join("\n");
     const encodedUri = encodeURI(csvContent);
     const link = document.createElement("a");
-    link.setAttribute("href", encodedUri);
-    link.setAttribute("download", `exam_vault_students_${new Date().toISOString().slice(0, 10)}.csv`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+    link.setAttribute("href", encodedUri); link.setAttribute("download", `exam_vault_students_${new Date().toISOString().slice(0, 10)}.csv`);
+    document.body.appendChild(link); link.click(); document.body.removeChild(link);
   };
 
-  // --- Duplicate Item Handlers ---
-  const handleDuplicateExam = async (exam: any) => {
-    const duplicatedPayload = {
-      ...exam,
-      id: undefined,
-      title: `${exam.title} (สำเนา)`,
-      created_at: new Date().toISOString()
-    };
-    delete duplicatedPayload.id;
+  const handleImportCSV = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!confirm("โครงสร้างไฟล์ CSV ต้องมีคอลัมน์: email, password, name, phone\n(รหัสผ่านถ้าเว้นว่าง ระบบจะตั้งให้เป็น 12345678 อัตโนมัติ)\n\nคุณแน่ใจหรือไม่ที่จะเริ่มนำเข้านักเรียน?")) { e.target.value = ""; return; }
+    
+    setIsImporting(true);
+    Papa.parse(file, {
+      header: true, skipEmptyLines: true,
+      complete: async (results: any) => {
+        const rows = results.data as any[];
+        let successCount = 0; let failCount = 0;
+        const { data: { session: adminSession } } = await supabase.auth.getSession();
 
+        for (const row of rows) {
+          const email = (row.email || row.Email)?.trim();
+          const password = (row.password || row.Password)?.trim() || "12345678";
+          const name = (row.name || row.Name)?.trim() || "";
+          const phone = (row.phone || row.Phone)?.trim() || "";
+          if (!email) continue;
+          
+          const { error: authError } = await supabase.auth.signUp({ email, password });
+          if (authError) { failCount++; continue; }
+
+          const { error: dbError } = await supabase.from('students').insert([{ name, email, phone, permissions: defaultPermissions, scores: { math: 0, english: 0, science: 0, thai: 0, social: 0 }, examHistory: [] }]);
+          if (!dbError) successCount++; else failCount++;
+        }
+        if (adminSession) await supabase.auth.setSession({ access_token: adminSession.access_token, refresh_token: adminSession.refresh_token });
+        
+        alert(`กระบวนการนำเข้าเสร็จสิ้น!\n✅ นำเข้าสำเร็จ: ${successCount} คน\n❌ ล้มเหลว/อีเมลซ้ำ: ${failCount} คน`);
+        setIsImporting(false); fetchStudents(); e.target.value = "";
+      },
+      error: (err: any) => { alert("เกิดข้อผิดพลาดในการอ่านไฟล์ CSV: " + err.message); setIsImporting(false); e.target.value = ""; }
+    });
+  };
+
+  const handleDuplicateExam = async (exam: any) => {
+    const duplicatedPayload = { ...exam, id: undefined, title: `${exam.title} (สำเนา)`, created_at: new Date().toISOString() };
+    delete duplicatedPayload.id;
     const { error } = await supabase.from('exams').insert([duplicatedPayload]);
-    if (error) alert("คัดลอกไม่สำเร็จ: " + error.message);
-    else {
-      alert("คัดลอกชุดข้อสอบเรียบร้อยแล้ว");
-      fetchExams();
-    }
+    if (error) alert("คัดลอกไม่สำเร็จ: " + error.message); else { alert("คัดลอกชุดข้อสอบเรียบร้อยแล้ว"); fetchExams(); }
   };
 
   const handleDuplicateWorksheet = async (ws: any) => {
-    const duplicatedPayload = {
-      ...ws,
-      id: undefined,
-      title: `${ws.title} (สำเนา)`
-    };
+    const duplicatedPayload = { ...ws, id: undefined, title: `${ws.title} (สำเนา)` };
     delete duplicatedPayload.id;
-
     const { error } = await supabase.from('worksheets').insert([duplicatedPayload]);
-    if (error) alert("คัดลอกไม่สำเร็จ: " + error.message);
-    else {
-      alert("คัดลอกแบบฝึกหัดเรียบร้อยแล้ว");
-      fetchWorksheets();
-    }
+    if (error) alert("คัดลอกไม่สำเร็จ: " + error.message); else { alert("คัดลอกแบบฝึกหัดเรียบร้อยแล้ว"); fetchWorksheets(); }
   };
 
-  // --- Access Code Handlers ---
   const handleCreateAccessCode = async () => {
     if (!newCodeName.trim()) return alert("กรุณาใส่ชื่อรหัสโค้ด");
     const code = newCodeName.toUpperCase().replace(/\s+/g, "");
-
-    const { error } = await supabase.from('access_codes').insert([{
-      code,
-      permissions: newCodePerms,
-      is_active: true
-    }]);
-
-    if (error) alert("สร้างโค้ดไม่สำเร็จ: " + error.message);
-    else {
-      alert(`สร้างโค้ด ${code} สำเร็จ!`);
-      setNewCodeName("");
-      fetchAccessCodes();
-    }
+    const { error } = await supabase.from('access_codes').insert([{ code, permissions: newCodePerms, is_active: true }]);
+    if (error) alert("สร้างโค้ดไม่สำเร็จ: " + error.message); else { alert(`สร้างโค้ด ${code} สำเร็จ!`); setNewCodeName(""); fetchAccessCodes(); }
   };
 
   const handleDeleteAccessCode = async (id: string | number) => {
@@ -368,64 +304,23 @@ function AdminDashboard() {
     }
   };
 
-  // --- Student Actions ---
-  const handleOpenAddStudent = () => { 
-    setFormData({ id: 0, name: "", email: "", password: "", phone: "", permissions: defaultPermissions }); 
-    setIsEditing(false); 
-    setShowStudentModal(true); 
-  };
-  
-  const handleOpenEditStudent = (student: any) => { 
-    const perms = student.permissions || defaultPermissions;
-    setFormData({ ...student, password: "", permissions: perms }); 
-    setIsEditing(true); 
-    setShowStudentModal(true); 
-  };
-
-  const handleTogglePermission = (key: string) => {
-    setFormData(prev => ({
-      ...prev,
-      permissions: { ...prev.permissions, [key]: !prev.permissions[key as keyof typeof prev.permissions] }
-    }));
-  };
+  const handleOpenAddStudent = () => { setFormData({ id: 0, name: "", email: "", password: "", phone: "", permissions: defaultPermissions }); setIsEditing(false); setShowStudentModal(true); };
+  const handleOpenEditStudent = (student: any) => { setFormData({ ...student, password: "", permissions: student.permissions || defaultPermissions }); setIsEditing(true); setShowStudentModal(true); };
+  const handleTogglePermission = (key: string) => { setFormData(prev => ({ ...prev, permissions: { ...prev.permissions, [key]: !prev.permissions[key as keyof typeof prev.permissions] } })); };
 
   const handleSaveStudent = async (e: React.FormEvent) => {
     e.preventDefault();
     if (formData.id) {
-      const { error } = await supabase.from('students').update({
-        name: formData.name,
-        email: formData.email,
-        phone: formData.phone,
-        permissions: formData.permissions,
-      }).eq('id', formData.id);
-
-      if (error) {
-        alert("เกิดข้อผิดพลาดในการอัปเดต: " + error.message);
-      } else {
-        alert("อัปเดตข้อมูลและสิทธิ์นักเรียนสำเร็จ!");
-        fetchStudents();
-        if (selectedStudent?.id === formData.id) setSelectedStudent({ ...selectedStudent, ...formData });
-      }
+      const { error } = await supabase.from('students').update({ name: formData.name, email: formData.email, phone: formData.phone, permissions: formData.permissions }).eq('id', formData.id);
+      if (error) alert("เกิดข้อผิดพลาดในการอัปเดต: " + error.message);
+      else { alert("อัปเดตข้อมูลและสิทธิ์นักเรียนสำเร็จ!"); fetchStudents(); if (selectedStudent?.id === formData.id) setSelectedStudent({ ...selectedStudent, ...formData }); }
     } else {
       const { data: { session: adminSession } } = await supabase.auth.getSession();
       const { error: authError } = await supabase.auth.signUp({ email: formData.email, password: formData.password });
       if (authError) return alert("ไม่สามารถสร้างบัญชีได้: " + authError.message);
-
-      if (adminSession) {
-        await supabase.auth.setSession({ access_token: adminSession.access_token, refresh_token: adminSession.refresh_token });
-      }
-
-      const { error } = await supabase.from('students').insert([{
-        name: formData.name,
-        email: formData.email,
-        phone: formData.phone,
-        permissions: formData.permissions,
-        scores: { math: 0, english: 0, science: 0, thai: 0, social: 0 },
-        examHistory: []
-      }]);
-
-      if (error) alert("เกิดข้อผิดพลาด: " + error.message);
-      else { alert("สร้างบัญชีนักเรียนสำเร็จ!"); fetchStudents(); }
+      if (adminSession) await supabase.auth.setSession({ access_token: adminSession.access_token, refresh_token: adminSession.refresh_token });
+      const { error } = await supabase.from('students').insert([{ name: formData.name, email: formData.email, phone: formData.phone, permissions: formData.permissions, scores: { math: 0, english: 0, science: 0, thai: 0, social: 0 }, examHistory: [] }]);
+      if (error) alert("เกิดข้อผิดพลาด: " + error.message); else { alert("สร้างบัญชีนักเรียนสำเร็จ!"); fetchStudents(); }
     }
     setShowStudentModal(false);
   };
@@ -434,287 +329,121 @@ function AdminDashboard() {
     if (confirm("คุณแน่ใจหรือไม่ที่จะลบนักเรียนคนนี้? ข้อมูลและคะแนนสอบทั้งหมดจะหายไปอย่างถาวร!")) { 
       const { error } = await supabase.from('students').delete().eq('id', id);
       await supabase.from('exam_submissions').delete().eq('student_id', id);
-      if (!error) { 
-        fetchStudents(); 
-        if (selectedStudent?.id === id) setSelectedStudent(null); 
-      }
+      if (!error) { fetchStudents(); if (selectedStudent?.id === id) setSelectedStudent(null); }
     } 
   };
 
   const handleDeleteAllStudents = async () => {
     if (students.length === 0) return alert("ไม่มีข้อมูลนักเรียนในระบบ");
-    const confirmName = prompt("🚨 คำเตือนขั้นสูง: คุณกำลังจะลบนักเรียนทุกคนและผลสอบทั้งหมดในระบบอย่างถาวร!\n\nพิมพ์คำว่า 'DELETE ALL' เพื่อยืนยัน:");
-    if (confirmName !== "DELETE ALL") return;
-
+    if (prompt("🚨 คำเตือนขั้นสูง: พิมพ์คำว่า 'DELETE ALL' เพื่อยืนยัน:") !== "DELETE ALL") return;
     const { error } = await supabase.from('students').delete().neq('id', 0);
     await supabase.from('exam_submissions').delete().neq('id', 0);
-
-    if (error) {
-      alert("เกิดข้อผิดพลาด: " + error.message);
-    } else {
-      alert("ลบข้อมูลนักเรียนทั้งหมดในระบบเรียบร้อยแล้ว");
-      setSelectedStudent(null);
-      fetchStudents();
-    }
+    if (error) alert("เกิดข้อผิดพลาด: " + error.message); else { alert("ลบข้อมูลนักเรียนทั้งหมดในระบบเรียบร้อยแล้ว"); setSelectedStudent(null); fetchStudents(); }
   };
 
   const handleResetAllStudentsData = async () => {
     if (students.length === 0) return alert("ไม่มีข้อมูลนักเรียนในระบบ");
     if (!confirm("⚠️ คุณต้องการรีเซ็ตผลสอบ ประวัติ และคะแนนของนักเรียน 'ทุกคน' ใช่หรือไม่?\n\n* บัญชีและสิทธิ์จะยังคงอยู่\n* สถิติและประวัติสอบจะถูกเคลียร์เป็น 0 ทั้งหมด")) return;
-
-    const { error } = await supabase.from('students').update({
-      examHistory: [],
-      scores: { math: 0, english: 0, science: 0, thai: 0, social: 0 }
-    }).neq('id', 0);
-
+    const { error } = await supabase.from('students').update({ examHistory: [], scores: { math: 0, english: 0, science: 0, thai: 0, social: 0 } }).neq('id', 0);
     await supabase.from('exam_submissions').delete().neq('id', 0);
-
-    if (error) {
-      alert("เกิดข้อผิดพลาด: " + error.message);
-    } else {
-      alert("รีเซ็ตผลสอบของนักเรียนทุกคนเรียบร้อยแล้ว");
-      fetchStudents();
-      if (selectedStudent) {
-        setSelectedStudent({
-          ...selectedStudent,
-          examHistory: [],
-          scores: { math: 0, english: 0, science: 0, thai: 0, social: 0 }
-        });
-      }
-    }
+    if (error) alert("เกิดข้อผิดพลาด: " + error.message); else { alert("รีเซ็ตผลสอบของนักเรียนทุกคนเรียบร้อยแล้ว"); fetchStudents(); if (selectedStudent) setSelectedStudent({ ...selectedStudent, examHistory: [], scores: { math: 0, english: 0, science: 0, thai: 0, social: 0 } }); }
   };
 
   const handleDeleteStudentHistory = async (studentToUpdate: any, historyId: number, examId: number) => {
-    if (!confirm("⚠️ ต้องการลบประวัติการสอบชุดนี้ใช่หรือไม่?\n\n* ข้อมูลคะแนนในกระดานจัดอันดับ (Leaderboard) จะถูกล้างออกเพื่อความเป็นธรรม")) return;
-
+    if (!confirm("⚠️ ต้องการลบประวัติการสอบชุดนี้ใช่หรือไม่?")) return;
     const newHistory = (studentToUpdate.examHistory || []).filter((h: any) => h.id !== historyId);
-
-    const { error } = await supabase.from('students').update({
-      examHistory: newHistory
-    }).eq('id', studentToUpdate.id);
-
+    const { error } = await supabase.from('students').update({ examHistory: newHistory }).eq('id', studentToUpdate.id);
     if (error) return alert("เกิดข้อผิดพลาด: " + error.message);
-
-    await supabase.from('exam_submissions')
-      .delete()
-      .eq('student_id', studentToUpdate.id)
-      .eq('exam_id', examId);
-
-    alert("ลบประวัติการสอบเรียบร้อย");
-    fetchStudents();
-    setSelectedStudent({ ...studentToUpdate, examHistory: newHistory });
+    await supabase.from('exam_submissions').delete().eq('student_id', studentToUpdate.id).eq('exam_id', examId);
+    alert("ลบประวัติการสอบเรียบร้อย"); fetchStudents(); setSelectedStudent({ ...studentToUpdate, examHistory: newHistory });
   };
 
   const handleResetStudentData = async (studentToUpdate: any) => {
-    if (!confirm("🚨 คำเตือน: คุณต้องการรีเซ็ตผลสอบทั้งหมดของนักเรียนคนนี้ใช่หรือไม่?\n\n* ประวัติการสอบจะหายไปทั้งหมด\n* บัญชีและสิทธิ์การเข้าถึงจะยังคงอยู่ปกติ\n* การกระทำนี้ไม่สามารถย้อนกลับได้!")) return;
-
-    const { error } = await supabase.from('students').update({
-      examHistory: [],
-      scores: { math: 0, english: 0, science: 0, thai: 0, social: 0 }
-    }).eq('id', studentToUpdate.id);
-
+    if (!confirm("🚨 คำเตือน: คุณต้องการรีเซ็ตผลสอบทั้งหมดของนักเรียนคนนี้ใช่หรือไม่?")) return;
+    const { error } = await supabase.from('students').update({ examHistory: [], scores: { math: 0, english: 0, science: 0, thai: 0, social: 0 } }).eq('id', studentToUpdate.id);
     if (error) return alert("เกิดข้อผิดพลาด: " + error.message);
-
     await supabase.from('exam_submissions').delete().eq('student_id', studentToUpdate.id);
-
-    alert("รีเซ็ตข้อมูลนักเรียนเป็นค่าเริ่มต้นเรียบร้อยแล้ว");
-    fetchStudents();
-    setSelectedStudent({ 
-      ...studentToUpdate, 
-      examHistory: [], 
-      scores: { math: 0, english: 0, science: 0, thai: 0, social: 0 } 
-    });
+    alert("รีเซ็ตข้อมูลนักเรียนเป็นค่าเริ่มต้นเรียบร้อยแล้ว"); fetchStudents(); setSelectedStudent({ ...studentToUpdate, examHistory: [], scores: { math: 0, english: 0, science: 0, thai: 0, social: 0 } });
   };
 
-  // --- Lesson Actions ---
   const handleSaveLesson = async (e: React.FormEvent) => {
     e.preventDefault();
     if (lessonFormData.grade.length === 0) return alert("กรุณาเลือกระดับชั้นอย่างน้อย 1 รายการ");
     if (lessonFormData.program.length === 0) return alert("กรุณาเลือกแผนการเรียนอย่างน้อย 1 รายการ");
-
-    const payload = {
-      title: lessonFormData.title,
-      grade: lessonFormData.grade.join(", "),
-      program: lessonFormData.program.join(", "),
-      subject: lessonFormData.subject,
-      video_url: lessonFormData.video_url,
-      pdf_url: lessonFormData.pdf_url,
-      description: lessonFormData.description
-    };
-
+    const payload = { title: lessonFormData.title, grade: lessonFormData.grade.join(", "), program: lessonFormData.program.join(", "), subject: lessonFormData.subject, video_url: lessonFormData.video_url, pdf_url: lessonFormData.pdf_url, description: lessonFormData.description };
     if (lessonFormData.id) {
       const { error } = await supabase.from('lessons').update(payload).eq('id', lessonFormData.id);
-      if (error) alert("อัปเดตบทเรียนไม่สำเร็จ: " + error.message);
-      else fetchLessons();
+      if (error) alert("อัปเดตบทเรียนไม่สำเร็จ: " + error.message); else fetchLessons();
     } else {
       const { error } = await supabase.from('lessons').insert([payload]);
-      if (error) alert("เพิ่มบทเรียนไม่สำเร็จ: " + error.message);
-      else fetchLessons();
+      if (error) alert("เพิ่มบทเรียนไม่สำเร็จ: " + error.message); else fetchLessons();
     }
     setShowLessonModal(false);
   };
 
-  const handleDeleteLesson = async (id: number) => {
-    if (confirm("ลบบทเรียนนี้ออกจากระบบ?")) {
-      const { error } = await supabase.from('lessons').delete().eq('id', id);
-      if (!error) fetchLessons();
-    }
-  };
-
+  const handleDeleteLesson = async (id: number) => { if (confirm("ลบบทเรียนนี้ออกจากระบบ?")) { const { error } = await supabase.from('lessons').delete().eq('id', id); if (!error) fetchLessons(); } };
   const handleDeleteFilteredLessons = async () => {
     if (filteredLessons.length === 0) return alert("ไม่มีบทเรียนในหมวดหมู่นี้");
     if (!confirm(`คุณต้องการลบบทเรียนในหมวด (${filterGrade} / ${filterProgram} / ${filterSubject}) ทั้งหมด ${filteredLessons.length} บทเรียนใช่หรือไม่?`)) return;
-
-    const ids = filteredLessons.map(l => l.id);
-    const { error } = await supabase.from('lessons').delete().in('id', ids);
-    if (error) alert("เกิดข้อผิดพลาด: " + error.message);
-    else {
-      alert("ลบบทเรียนในหมวดหมู่ที่เลือกเรียบร้อย");
-      fetchLessons();
-    }
+    const ids = filteredLessons.map(l => l.id); const { error } = await supabase.from('lessons').delete().in('id', ids);
+    if (error) alert("เกิดข้อผิดพลาด: " + error.message); else { alert("ลบบทเรียนในหมวดหมู่ที่เลือกเรียบร้อย"); fetchLessons(); }
   };
-
   const handleDeleteAllLessons = async () => {
     if (lessons.length === 0) return alert("ไม่มีบทเรียนในระบบ");
     if (!confirm("🚨 ต้องการลบบทเรียน 'ทั้งหมดในระบบ' หรือไม่?")) return;
     const { error } = await supabase.from('lessons').delete().neq('id', 0);
-    if (error) alert("เกิดข้อผิดพลาด: " + error.message);
-    else {
-      alert("ลบบทเรียนทั้งหมดเรียบร้อยแล้ว");
-      fetchLessons();
-    }
+    if (error) alert("เกิดข้อผิดพลาด: " + error.message); else { alert("ลบบทเรียนทั้งหมดเรียบร้อยแล้ว"); fetchLessons(); }
   };
 
-  // --- Worksheet Actions ---
   const handleUploadWorksheetImages = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0) {
       setIsUploading(true);
-      const files = Array.from(e.target.files);
-      const uploadedUrls: string[] = [];
-
-      try {
-        for (const file of files) {
-          const url = await uploadImageToStorage(file, 'worksheets');
-          uploadedUrls.push(url);
-        }
-        setWorksheetFormData(prev => ({ ...prev, pages: [...prev.pages, ...uploadedUrls] }));
-      } catch (error) {
-        alert("อัปโหลดรูปภาพไม่สำเร็จ กรุณาลองใหม่");
-        console.error(error);
-      } finally {
-        setIsUploading(false);
-      }
+      const files = Array.from(e.target.files); const uploadedUrls: string[] = [];
+      try { for (const file of files) { const url = await uploadImageToStorage(file, 'worksheets'); uploadedUrls.push(url); } setWorksheetFormData(prev => ({ ...prev, pages: [...prev.pages, ...uploadedUrls] })); } 
+      catch (error) { alert("อัปโหลดรูปภาพไม่สำเร็จ กรุณาลองใหม่"); console.error(error); } finally { setIsUploading(false); }
     }
   };
 
   const handleSaveWorksheet = async () => {
     if (!worksheetFormData.title) return alert("กรุณาใส่ชื่อชุดแบบฝึกหัด");
     if (worksheetFormData.pages.length === 0) return alert("กรุณาอัปโหลดรูปภาพแบบฝึกหัดอย่างน้อย 1 หน้า");
-    const payload = {
-      title: worksheetFormData.title,
-      grade: worksheetFormData.grade.join(", "),
-      program: worksheetFormData.program.join(", "),
-      subject: worksheetFormData.subject,
-      pages: worksheetFormData.pages
-    };
+    const payload = { title: worksheetFormData.title, grade: worksheetFormData.grade.join(", "), program: worksheetFormData.program.join(", "), subject: worksheetFormData.subject, pages: worksheetFormData.pages };
     const { error } = await supabase.from('worksheets').insert([payload]);
     if (error) alert("เกิดข้อผิดพลาดในการบันทึกแบบฝึกหัด: " + error.message);
-    else {
-      alert("เพิ่มแบบฝึกหัดเข้าระบบสำเร็จ!");
-      setShowWorksheetModal(false);
-      setWorksheetFormData({ title: "", grade: ["ป.6"], program: ["ISM"], subject: "คณิตศาสตร์", pages: [] });
-      fetchWorksheets();
-    }
+    else { alert("เพิ่มแบบฝึกหัดเข้าระบบสำเร็จ!"); setShowWorksheetModal(false); setWorksheetFormData({ title: "", grade: ["ป.6"], program: ["ISM"], subject: "คณิตศาสตร์", pages: [] }); fetchWorksheets(); }
   };
 
-  const handleDeleteWorksheet = async (id: number) => {
-    if (confirm("ต้องการลบแบบฝึกหัดชุดนี้ออกจากระบบ?")) {
-      const { error } = await supabase.from('worksheets').delete().eq('id', id);
-      if (!error) fetchWorksheets();
-    }
-  };
-
+  const handleDeleteWorksheet = async (id: number) => { if (confirm("ต้องการลบแบบฝึกหัดชุดนี้ออกจากระบบ?")) { const { error } = await supabase.from('worksheets').delete().eq('id', id); if (!error) fetchWorksheets(); } };
   const handleDeleteFilteredWorksheets = async () => {
     if (filteredWorksheets.length === 0) return alert("ไม่มีแบบฝึกหัดในหมวดหมู่นี้");
     if (!confirm(`คุณต้องการลบแบบฝึกหัดในหมวด (${filterGrade} / ${filterProgram} / ${filterSubject}) ทั้งหมด ${filteredWorksheets.length} ชุดใช่หรือไม่?`)) return;
-
-    const ids = filteredWorksheets.map(w => w.id);
-    const { error } = await supabase.from('worksheets').delete().in('id', ids);
-    if (error) alert("เกิดข้อผิดพลาด: " + error.message);
-    else {
-      alert("ลบแบบฝึกหัดในหมวดหมู่ที่เลือกเรียบร้อย");
-      fetchWorksheets();
-    }
+    const ids = filteredWorksheets.map(w => w.id); const { error } = await supabase.from('worksheets').delete().in('id', ids);
+    if (error) alert("เกิดข้อผิดพลาด: " + error.message); else { alert("ลบแบบฝึกหัดในหมวดหมู่ที่เลือกเรียบร้อย"); fetchWorksheets(); }
   };
-
   const handleDeleteAllWorksheets = async () => {
     if (worksheets.length === 0) return alert("ไม่มีแบบฝึกหัดในระบบ");
     if (!confirm("🚨 ต้องการลบแบบฝึกหัด 'ทั้งหมดในระบบ' หรือไม่?")) return;
     const { error } = await supabase.from('worksheets').delete().neq('id', 0);
-    if (error) alert("เกิดข้อผิดพลาด: " + error.message);
-    else {
-      alert("ลบแบบฝึกหัดทั้งหมดเรียบร้อยแล้ว");
-      fetchWorksheets();
-    }
+    if (error) alert("เกิดข้อผิดพลาด: " + error.message); else { alert("ลบแบบฝึกหัดทั้งหมดเรียบร้อยแล้ว"); fetchWorksheets(); }
   };
 
-  // --- Exam Actions ---
   const handleOpenEditExam = (exam: any) => {
     setEditingExamId(exam.id);
-    
     const safeGrades = safeGetArray(exam.grade);
     const safePrograms = safeGetArray(exam.program);
 
-    setNewExamInfo({
-      title: exam.title,
-      grade: safeGrades.length > 0 ? safeGrades : ["ป.6"],
-      program: safePrograms.length > 0 ? safePrograms : ["ISM"],
-      subject: exam.subject,
-      year: exam.year || "2566",
-      is_timed: exam.is_timed !== false,
-      duration_minutes: exam.duration_minutes || 90,
-      shuffle_questions: exam.shuffle_questions || false
-    });
-
-    const parsedQuestions: QuestionItem[] = (Array.isArray(exam.questions) ? exam.questions : []).map((q: any, idx: number) => ({
-      id: q.id || idx + 1,
-      type: q.type === "subjective" ? "subjective" : "choice",
-      question: q.question || "",
-      image_url: q.image_url || "",
-      options: Array.isArray(q.options) && q.options.length > 0 ? q.options : ["", "", "", ""],
-      correct_index: typeof q.correct_index === "number" ? q.correct_index : 0,
-      subjective_answers: Array.isArray(q.subjective_answers) && q.subjective_answers.length > 0 ? q.subjective_answers : [""],
-      explanation: q.explanation || ""
-    }));
-
-    setManualQuestions(parsedQuestions.length > 0 ? parsedQuestions : [
-      { id: 1, type: "choice", question: "", image_url: "", options: ["", "", "", ""], correct_index: 0, subjective_answers: [""], explanation: "" }
-    ]);
+    setNewExamInfo({ title: exam.title, grade: safeGrades.length > 0 ? safeGrades : ["ป.6"], program: safePrograms.length > 0 ? safePrograms : ["ISM"], subject: exam.subject, year: exam.year || "2566", is_timed: exam.is_timed !== false, duration_minutes: exam.duration_minutes || 90, shuffle_questions: exam.shuffle_questions || false });
+    const parsedQuestions: QuestionItem[] = (Array.isArray(exam.questions) ? exam.questions : []).map((q: any, idx: number) => ({ id: q.id || idx + 1, type: q.type === "subjective" ? "subjective" : "choice", question: q.question || "", image_url: q.image_url || "", options: Array.isArray(q.options) && q.options.length > 0 ? q.options : ["", "", "", ""], correct_index: typeof q.correct_index === "number" ? q.correct_index : 0, subjective_answers: Array.isArray(q.subjective_answers) && q.subjective_answers.length > 0 ? q.subjective_answers : [""], explanation: q.explanation || "" }));
+    setManualQuestions(parsedQuestions.length > 0 ? parsedQuestions : [ { id: 1, type: "choice", question: "", image_url: "", options: ["", "", "", ""], correct_index: 0, subjective_answers: [""], explanation: "" } ]);
     setExamModalMode("manual");
   };
 
-  const addManualQuestion = () => {
-    setManualQuestions(prev => [
-      ...prev,
-      { id: Date.now(), type: "choice", question: "", image_url: "", options: ["", "", "", ""], correct_index: 0, subjective_answers: [""], explanation: "" }
-    ]);
-  };
-
-  const removeManualQuestion = (index: number) => {
-    if (manualQuestions.length === 1) return alert("ต้องมีอย่างน้อย 1 ข้อคำถาม");
-    setManualQuestions(prev => prev.filter((_, i) => i !== index));
-  };
-
+  const addManualQuestion = () => { setManualQuestions(prev => [ ...prev, { id: Date.now(), type: "choice", question: "", image_url: "", options: ["", "", "", ""], correct_index: 0, subjective_answers: [""], explanation: "" } ]); };
+  const removeManualQuestion = (index: number) => { if (manualQuestions.length === 1) return alert("ต้องมีอย่างน้อย 1 ข้อคำถาม"); setManualQuestions(prev => prev.filter((_, i) => i !== index)); };
+  
   const toggleQuestionType = (index: number, newType: "choice" | "subjective") => {
     setManualQuestions(prev => prev.map((q, i) => {
-      if (i === index) {
-        return {
-          ...q,
-          type: newType,
-          options: q.options && q.options.length > 0 ? q.options : ["", "", "", ""],
-          subjective_answers: q.subjective_answers && q.subjective_answers.length > 0 ? q.subjective_answers : [""]
-        };
-      }
+      if (i === index) return { ...q, type: newType, options: q.options && q.options.length > 0 ? q.options : ["", "", "", ""], subjective_answers: q.subjective_answers && q.subjective_answers.length > 0 ? q.subjective_answers : [""] };
       return q;
     }));
   };
@@ -725,92 +454,20 @@ function AdminDashboard() {
   const updateQuestionImage = async (index: number, e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
       setIsUploading(true);
-      try {
-        const file = e.target.files[0];
-        const url = await uploadImageToStorage(file, 'exam-questions');
-        setManualQuestions(prev => prev.map((q, i) => i === index ? { ...q, image_url: url } : q));
-      } catch (error) {
-        alert("อัปโหลดรูปภาพไม่สำเร็จ กรุณาลองใหม่");
-        console.error(error);
-      } finally {
-        setIsUploading(false);
-      }
+      try { const file = e.target.files[0]; const url = await uploadImageToStorage(file, 'exam-questions'); setManualQuestions(prev => prev.map((q, i) => i === index ? { ...q, image_url: url } : q)); } 
+      catch (error) { alert("อัปโหลดรูปภาพไม่สำเร็จ กรุณาลองใหม่"); console.error(error); } 
+      finally { setIsUploading(false); }
     }
   };
 
-  const removeQuestionImage = (index: number) => {
-    setManualQuestions(prev => prev.map((q, i) => {
-      if (i === index) {
-        const isNeedsImage = q.question.includes("จากรูป");
-        return { ...q, image_url: isNeedsImage ? "NEEDS_IMAGE" : "" };
-      }
-      return q;
-    }));
-  };
-
-  const addOptionToQuestion = (qIndex: number) => {
-    setManualQuestions(prev => prev.map((q, i) => {
-      if (i === qIndex) {
-        if (q.options.length >= 5) { alert("เพิ่มตัวเลือกได้สูงสุด 5 ช้อยส์"); return q; }
-        return { ...q, options: [...q.options, ""] };
-      }
-      return q;
-    }));
-  };
-
-  const removeOptionFromQuestion = (qIndex: number, optIndex: number) => {
-    setManualQuestions(prev => prev.map((q, i) => {
-      if (i === qIndex) {
-        if (q.options.length <= 2) { alert("ต้องมีอย่างน้อย 2 ตัวเลือก"); return q; }
-        const updated = q.options.filter((_, oi) => oi !== optIndex);
-        const prevCorrect = q.correct_index ?? 0;
-        return { ...q, options: updated, correct_index: prevCorrect >= updated.length ? 0 : prevCorrect };
-      }
-      return q;
-    }));
-  };
-
-  const updateOptionText = (qIndex: number, optIndex: number, text: string) => {
-    setManualQuestions(prev => prev.map((q, i) => {
-      if (i === qIndex) {
-        const nextOpts = [...q.options];
-        nextOpts[optIndex] = text;
-        return { ...q, options: nextOpts };
-      }
-      return q;
-    }));
-  };
-
+  const removeQuestionImage = (index: number) => { setManualQuestions(prev => prev.map((q, i) => { if (i === index) { const isNeedsImage = q.question.includes("จากรูป"); return { ...q, image_url: isNeedsImage ? "NEEDS_IMAGE" : "" }; } return q; })); };
+  const addOptionToQuestion = (qIndex: number) => { setManualQuestions(prev => prev.map((q, i) => { if (i === qIndex) { if (q.options.length >= 5) { alert("เพิ่มตัวเลือกได้สูงสุด 5 ช้อยส์"); return q; } return { ...q, options: [...q.options, ""] }; } return q; })); };
+  const removeOptionFromQuestion = (qIndex: number, optIndex: number) => { setManualQuestions(prev => prev.map((q, i) => { if (i === qIndex) { if (q.options.length <= 2) { alert("ต้องมีอย่างน้อย 2 ตัวเลือก"); return q; } const updated = q.options.filter((_, oi) => oi !== optIndex); const prevCorrect = q.correct_index ?? 0; return { ...q, options: updated, correct_index: prevCorrect >= updated.length ? 0 : prevCorrect }; } return q; })); };
+  const updateOptionText = (qIndex: number, optIndex: number, text: string) => { setManualQuestions(prev => prev.map((q, i) => { if (i === qIndex) { const nextOpts = [...q.options]; nextOpts[optIndex] = text; return { ...q, options: nextOpts }; } return q; })); };
   const setCorrectOption = (qIndex: number, optIndex: number) => setManualQuestions(prev => prev.map((q, i) => i === qIndex ? { ...q, correct_index: optIndex } : q));
-
-  const addSubjectiveAnswerLine = (qIndex: number) => {
-    setManualQuestions(prev => prev.map((q, i) => {
-      if (i === qIndex) return { ...q, subjective_answers: [...(q.subjective_answers || []), ""] };
-      return q;
-    }));
-  };
-
-  const removeSubjectiveAnswerLine = (qIndex: number, lineIndex: number) => {
-    setManualQuestions(prev => prev.map((q, i) => {
-      if (i === qIndex) {
-        const currentLines = q.subjective_answers || [];
-        if (currentLines.length <= 1) { alert("ต้องมีอย่างน้อย 1 ช่องคำตอบ"); return q; }
-        return { ...q, subjective_answers: currentLines.filter((_, li) => li !== lineIndex) };
-      }
-      return q;
-    }));
-  };
-
-  const updateSubjectiveAnswerText = (qIndex: number, lineIndex: number, text: string) => {
-    setManualQuestions(prev => prev.map((q, i) => {
-      if (i === qIndex) {
-        const currentLines = [...(q.subjective_answers || [""])];
-        currentLines[lineIndex] = text;
-        return { ...q, subjective_answers: currentLines };
-      }
-      return q;
-    }));
-  };
+  const addSubjectiveAnswerLine = (qIndex: number) => { setManualQuestions(prev => prev.map((q, i) => { if (i === qIndex) return { ...q, subjective_answers: [...(q.subjective_answers || []), ""] }; return q; })); };
+  const removeSubjectiveAnswerLine = (qIndex: number, lineIndex: number) => { setManualQuestions(prev => prev.map((q, i) => { if (i === qIndex) { const currentLines = q.subjective_answers || []; if (currentLines.length <= 1) { alert("ต้องมีอย่างน้อย 1 ช่องคำตอบ"); return q; } return { ...q, subjective_answers: currentLines.filter((_, li) => li !== lineIndex) }; } return q; })); };
+  const updateSubjectiveAnswerText = (qIndex: number, lineIndex: number, text: string) => { setManualQuestions(prev => prev.map((q, i) => { if (i === qIndex) { const currentLines = [...(q.subjective_answers || [""])]; currentLines[lineIndex] = text; return { ...q, subjective_answers: currentLines }; } return q; })); };
 
   const urlToBase64 = async (url: string): Promise<string> => {
     const response = await fetch(url);
@@ -825,6 +482,80 @@ function AdminDashboard() {
       reader.onerror = reject;
       reader.readAsDataURL(blob);
     });
+  };
+
+  // ✅ ฟังก์ชันใหม่: สแกนเฉพาะข้อ
+  const handleScanSingleQuestion = async (qIndex: number, e: React.ChangeEvent<HTMLInputElement>) => {
+    // 👇 แก้ไข: เพิ่มการเช็กไฟล์ให้ TypeScript มั่นใจว่ามีไฟล์จริงๆ
+    const file = e.target.files?.[0];
+    if (!file) return; 
+    
+    setScanningQIndex(qIndex);
+    try {
+      const base64Data = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onloadend = () => resolve(reader.result?.toString().split(',')[1] || "");
+        reader.onerror = reject;
+        reader.readAsDataURL(file); // ขีดแดงตรงนี้จะหายไปครับ
+      });
+
+      const promptText = `วิเคราะห์รูปภาพโจทย์ข้อสอบ (1 ข้อ) แล้วแปลงข้อมูลเป็นรูปแบบ JSON
+{ 
+  "type": "choice" หรือ "subjective",
+  "question": "ข้อความโจทย์คำถาม", 
+  "options": ["คำตอบข้อ1", "คำตอบข้อ2", "คำตอบข้อ3", "คำตอบข้อ4"],
+  "correct_index": 0,
+  "subjective_answers": ["คำตอบบรรทัดที่ 1", "คำตอบบรรทัดที่ 2 (ถ้ามี)"],
+  "explanation": "เฉลยวิธีทำ (ถ้ามีในรูป)"
+}
+คำแนะนำสำคัญ (ข้อควรระวัง): 
+1. ⚠️ ในฟิลด์ options ให้ใส่เฉพาะ "เนื้อหาคำตอบ" เท่านั้น ห้ามใส่ ก. ข. ค. ง. จ. นำหน้าเด็ดขาด!
+2. ⚠️ หากโจทย์มีสัญลักษณ์ทางคณิตศาสตร์ ให้ใช้สัญลักษณ์ตามนี้แทน ห้ามใช้ LaTeX หรือ $: มุมพิมพ์ ∠, องศาพิมพ์ °, ขนานพิมพ์ //, เศษส่วนพิมพ์ 1/2 หรือ ½, ยกกำลังพิมพ์ ^2 หรือ ²
+3. ตอบกลับมาเป็นโครงสร้าง JSON เพียวๆ เท่านั้น ห้ามมีคำอธิบายเพิ่มเติม`;
+
+      const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
+      if (!apiKey) throw new Error("ไม่พบ API Key กรุณาตรวจสอบไฟล์ .env");
+
+      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${apiKey}`, { 
+        method: "POST", 
+        headers: { "Content-Type": "application/json" }, 
+        body: JSON.stringify({ contents: [{ parts: [{ text: promptText }, { inline_data: { mime_type: "image/jpeg", data: base64Data } }] }] }) 
+      });
+
+      const data = await response.json();
+      
+      if (response.ok && data.candidates?.[0]?.content?.parts?.[0]?.text) {
+        const rawText = data.candidates[0].content.parts[0].text;
+        const cleanedText = rawText.replace(/```json|```/g, "").trim();
+        const parsed = JSON.parse(cleanedText);
+
+        setManualQuestions(prev => prev.map((q, i) => {
+          if (i === qIndex) {
+            return {
+              ...q,
+              type: parsed.type === "subjective" ? "subjective" : "choice",
+              question: parsed.question || q.question,
+              options: Array.isArray(parsed.options) && parsed.options.length > 0 
+                ? parsed.options.map((opt: string) => typeof opt === "string" ? opt.replace(/^[กขคงจ]\s*\.\s*/, '').trim() : opt)
+                : q.options,
+              correct_index: typeof parsed.correct_index === "number" ? parsed.correct_index : q.correct_index,
+              subjective_answers: Array.isArray(parsed.subjective_answers) && parsed.subjective_answers.length > 0 ? parsed.subjective_answers : q.subjective_answers,
+              explanation: parsed.explanation || q.explanation
+            };
+          }
+          return q;
+        }));
+        
+      } else {
+        throw new Error(data.error?.message || "ไม่สามารถเชื่อมต่อกับ AI ได้ในขณะนี้");
+      }
+    } catch (error: any) {
+      console.error("AI Error:", error);
+      alert(`ขัดข้อง: ${error.message}`);
+    } finally {
+      setScanningQIndex(null);
+      e.target.value = "";
+    }
   };
 
   const handleGenerateExplanation = async (qIndex: number) => {
@@ -842,10 +573,10 @@ function AdminDashboard() {
 
       if (q.type === "choice") {
         const correctAns = q.options[q.correct_index || 0];
-        promptText = `ในฐานะครูผู้เชี่ยวชาญ จงเขียนอธิบายเฉลยและวิธีทำอย่างละเอียดสำหรับโจทย์ข้อนี้\nโจทย์: ${questionText}\nตัวเลือก: ${q.options.join(", ")}\nคำตอบที่ถูกต้องคือ: ${correctAns}\nอธิบายทีละขั้นตอนให้เด็กเข้าใจง่าย ไม่ต้องเกริ่นนำ ให้พิมพ์เนื้อหาคำอธิบายได้เลย`;
+        promptText = `ในฐานะครูผู้เชี่ยวชาญ จงเขียนอธิบายเฉลยและวิธีทำอย่างละเอียดสำหรับโจทย์ข้อนี้\nโจทย์: ${questionText}\nตัวเลือก: ${q.options.join(", ")}\nคำตอบที่ถูกต้องคือ: ${correctAns}\nอธิบายทีละขั้นตอนให้เด็กเข้าใจง่าย ไม่ต้องเกริ่นนำ ให้พิมพ์เนื้อหาคำอธิบายได้เลย\n\nคำแนะนำสำคัญ: ห้ามใช้โค้ด LaTeX หรือเครื่องหมาย $ ในการเขียนสมการเด็ดขาด ให้พิมพ์เป็นข้อความธรรมดา หรือสัญลักษณ์แบบ Unicode แทน (เช่น เศษส่วนพิมพ์ 1/2, ยกกำลังพิมพ์ ^2, องศาพิมพ์ °, ขนานพิมพ์ //) เครื่องหมายคูณให้ใช้ตัว x เล็ก`;
       } else {
         const correctAns = (q.subjective_answers || []).join(", ");
-        promptText = `ในฐานะครูผู้เชี่ยวชาญ จงเขียนอธิบายเฉลยและวิธีทำอย่างละเอียดสำหรับโจทย์ข้อนี้\nโจทย์: ${questionText}\nคำตอบที่ถูกต้องคือ: ${correctAns}\nอธิบายทีละขั้นตอนให้เด็กเข้าใจง่าย ไม่ต้องเกริ่นนำ ให้พิมพ์เนื้อหาคำอธิบายได้เลย`;
+        promptText = `ในฐานะครูผู้เชี่ยวชาญ จงเขียนอธิบายเฉลยและวิธีทำอย่างละเอียดสำหรับโจทย์ข้อนี้\nโจทย์: ${questionText}\nคำตอบที่ถูกต้องคือ: ${correctAns}\nอธิบายทีละขั้นตอนให้เด็กเข้าใจง่าย ไม่ต้องเกริ่นนำ ให้พิมพ์เนื้อหาคำอธิบายได้เลย\n\nคำแนะนำสำคัญ: ห้ามใช้โค้ด LaTeX หรือเครื่องหมาย $ ในการเขียนสมการเด็ดขาด ให้พิมพ์เป็นข้อความธรรมดา หรือสัญลักษณ์แบบ Unicode แทน (เช่น เศษส่วนพิมพ์ 1/2, ยกกำลังพิมพ์ ^2, องศาพิมพ์ °, ขนานพิมพ์ //) เครื่องหมายคูณให้ใช้ตัว x เล็ก`;
       }
 
       const requestParts: any[] = [{ text: promptText }];
@@ -862,13 +593,14 @@ function AdminDashboard() {
         }
       }
 
-      const response = await fetch(`/api/gemini`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          model: "gemini-2.5-flash", 
-          contents: [{ parts: requestParts }]
-        })
+      const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
+      if (!apiKey) throw new Error("ไม่พบ API Key กรุณาตรวจสอบไฟล์ .env");
+
+      // คงชื่อโมเดลไว้ตามที่คุณใช้งานได้ปกติ
+      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key=${apiKey}`, { 
+        method: "POST", 
+        headers: { "Content-Type": "application/json" }, 
+        body: JSON.stringify({ contents: [{ parts: requestParts }] }) 
       });
 
       const data = await response.json();
@@ -925,16 +657,18 @@ function AdminDashboard() {
 คำแนะนำสำคัญ (ข้อควรระวัง): 
 1. ⚠️ ในฟิลด์ options ให้ใส่เฉพาะ "เนื้อหาคำตอบ" เท่านั้น ห้ามใส่ตัวอักษร ก. ข. ค. ง. จ. นำหน้าเด็ดขาด!
 2. ⚠️ หากโจทย์ข้อนั้นมี "รูปภาพเรขาคณิต" ประกอบโจทย์ หรือในโจทย์มีคำว่า "จากรูป" ให้ใส่ค่าในฟิลด์ image_url เป็น "NEEDS_IMAGE" เพื่อแจ้งเตือนระบบ
-3. หากเฉลยในรูปมีการโยงลูกศรแบบรูปภาพ (เช่น อนุกรมตัวเลข) ให้เขียนอธิบายเป็น text ในช่อง explanation แทนการแปลงเป็นเครื่องหมายแปลกๆ
-4. ตอบกลับมาเป็นโครงสร้าง JSON เพียวๆ เท่านั้น ห้ามใส่ markdown code block`;
+3. หากเฉลยในรูปมีการโยงลูกศรแบบรูปภาพ ให้เขียนอธิบายเป็น text ในช่อง explanation แทนการแปลงเป็นเครื่องหมายแปลกๆ
+4. ตอบกลับมาเป็นโครงสร้าง JSON เพียวๆ เท่านั้น ห้ามใส่ markdown code block
+5. ⚠️ ห้ามใช้โค้ด LaTeX หรือสัญลักษณ์ $ ในการเขียนสมการเด็ดขาด ให้พิมพ์เป็นข้อความธรรมดา หรือสัญลักษณ์แบบ Unicode แทน (เช่น เศษส่วนพิมพ์ 1/2, ยกกำลังพิมพ์ ^2, องศาพิมพ์ °, ขนานพิมพ์ //)`;
 
-      const response = await fetch(`/api/gemini`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          model: "gemini-2.5-flash", 
-          contents: [{ parts: [{ text: promptText }, ...imageParts] }]
-        })
+      const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
+      if (!apiKey) throw new Error("ไม่พบ API Key กรุณาตรวจสอบไฟล์ .env");
+
+      // คงชื่อโมเดลไว้ตามที่คุณใช้งานได้ปกติ
+      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key=${apiKey}`, { 
+        method: "POST", 
+        headers: { "Content-Type": "application/json" }, 
+        body: JSON.stringify({ contents: [{ parts: [{ text: promptText }, ...imageParts] }] }) 
       });
 
       const data = await response.json();
@@ -1083,22 +817,25 @@ function AdminDashboard() {
     return cleanItem === cleanFilter || cleanItem.includes(cleanFilter);
   };
 
+  const matchFilterGrade = (itemGrades: string[], filterG: string) => filterG === "ทั้งหมด" || itemGrades.includes(filterG);
+  const matchFilterProgram = (itemPrograms: string[], filterP: string) => filterP === "ทั้งหมด" || itemPrograms.includes(filterP);
+
   const filteredExams = exams.filter(exam => {
-    const examGrades = safeGetArray(exam.grade);
-    const examPrograms = safeGetArray(exam.program);
-    return examGrades.includes(filterGrade) && examPrograms.includes(filterProgram) && matchFilterSubject(exam.subject, filterSubject);
+    return matchFilterGrade(safeGetArray(exam.grade), filterGrade) && 
+           matchFilterProgram(safeGetArray(exam.program), filterProgram) && 
+           matchFilterSubject(exam.subject, filterSubject);
   });
 
   const filteredLessons = lessons.filter(l => {
-    const lessonGrades = safeGetArray(l.grade);
-    const lessonPrograms = safeGetArray(l.program);
-    return lessonGrades.includes(filterGrade) && lessonPrograms.includes(filterProgram) && matchFilterSubject(l.subject, filterSubject);
+    return matchFilterGrade(safeGetArray(l.grade), filterGrade) && 
+           matchFilterProgram(safeGetArray(l.program), filterProgram) && 
+           matchFilterSubject(l.subject, filterSubject);
   });
 
   const filteredWorksheets = worksheets.filter(ws => {
-    const wsGrades = safeGetArray(ws.grade);
-    const wsPrograms = safeGetArray(ws.program);
-    return wsGrades.includes(filterGrade) && wsPrograms.includes(filterProgram) && matchFilterSubject(ws.subject, filterSubject);
+    return matchFilterGrade(safeGetArray(ws.grade), filterGrade) && 
+           matchFilterProgram(safeGetArray(ws.program), filterProgram) && 
+           matchFilterSubject(ws.subject, filterSubject);
   });
 
   const choiceLabels = ["ก.", "ข.", "ค.", "ง.", "จ."];
@@ -1154,7 +891,7 @@ function AdminDashboard() {
             <button 
               onClick={() => { 
                 setEditingExamId(null);
-                setNewExamInfo({ title: "", grade: [filterGrade], program: [filterProgram], subject: filterSubject === "ทั้งหมด" ? "คณิตศาสตร์" : filterSubject, year: "2566", is_timed: true, duration_minutes: 90, shuffle_questions: false });
+                setNewExamInfo({ title: "", grade: [filterGrade === "ทั้งหมด" ? "ป.6" : filterGrade], program: [filterProgram === "ทั้งหมด" ? "ISM" : filterProgram], subject: filterSubject === "ทั้งหมด" ? "คณิตศาสตร์" : filterSubject, year: "2566", is_timed: true, duration_minutes: 90, shuffle_questions: false });
                 setExamModalMode("exam_info"); 
                 setPreviewImages([]); 
                 setManualQuestions([{ id: 1, type: "choice", question: "", image_url: "", options: ["", "", "", ""], correct_index: 0, subjective_answers: [""], explanation: "" }]);
@@ -1168,7 +905,7 @@ function AdminDashboard() {
           {activeTab === "lessons" && (
             <button 
               onClick={() => {
-                setLessonFormData({ id: 0, title: "", grade: [filterGrade], program: [filterProgram], subject: filterSubject === "ทั้งหมด" ? "คณิตศาสตร์" : filterSubject, video_url: "", pdf_url: "", description: "" });
+                setLessonFormData({ id: 0, title: "", grade: [filterGrade === "ทั้งหมด" ? "ป.6" : filterGrade], program: [filterProgram === "ทั้งหมด" ? "ISM" : filterProgram], subject: filterSubject === "ทั้งหมด" ? "คณิตศาสตร์" : filterSubject, video_url: "", pdf_url: "", description: "" });
                 setShowLessonModal(true);
               }}
               className="flex items-center justify-center gap-2 rounded-2xl bg-primary px-5 py-2.5 text-white font-bold hover:bg-primary/90 transition shadow-sm"
@@ -1206,11 +943,11 @@ function AdminDashboard() {
               <div className="flex items-center gap-3 border-b pb-4"><Filter className="size-5 text-primary" /><h3 className="font-bold text-slate-800">หมวดหมู่บทเรียน</h3></div>
               <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-6">
                 <span className="font-semibold text-slate-700 w-24">ระดับชั้น:</span>
-                <div className="flex flex-wrap gap-2">{["ป.4", "ป.5", "ป.6"].map(grade => (<button key={grade} onClick={() => setFilterGrade(grade)} className={`px-5 py-1.5 rounded-full text-sm font-medium transition-colors border ${filterGrade === grade ? 'bg-primary text-white border-primary shadow-sm' : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'}`}>{grade}</button>))}</div>
+                <div className="flex flex-wrap gap-2">{["ทั้งหมด", "ป.4", "ป.5", "ป.6"].map(grade => (<button key={grade} onClick={() => setFilterGrade(grade)} className={`px-5 py-1.5 rounded-full text-sm font-medium transition-colors border ${filterGrade === grade ? 'bg-primary text-white border-primary shadow-sm' : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'}`}>{grade}</button>))}</div>
               </div>
               <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-6">
                 <span className="font-semibold text-slate-700 w-24">แผนการเรียน:</span>
-                <div className="flex flex-wrap gap-2">{["ISM", "EP", "ภาคปกติ"].map(program => (<button key={program} onClick={() => setFilterProgram(program)} className={`px-5 py-1.5 rounded-full text-sm font-medium transition-colors border ${filterProgram === program ? 'bg-primary text-white border-primary shadow-sm' : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'}`}>{program === "ภาคปกติ" ? "ภาคปกติ (Regular)" : `แผน ${program}`}</button>))}</div>
+                <div className="flex flex-wrap gap-2">{["ทั้งหมด", "ISM", "EP", "ภาคปกติ"].map(program => (<button key={program} onClick={() => setFilterProgram(program)} className={`px-5 py-1.5 rounded-full text-sm font-medium transition-colors border ${filterProgram === program ? 'bg-primary text-white border-primary shadow-sm' : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'}`}>{program === "ภาคปกติ" ? "ภาคปกติ (Regular)" : program === "ทั้งหมด" ? "ทั้งหมด" : `แผน ${program}`}</button>))}</div>
               </div>
               <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-6 pt-2">
                 <span className="font-semibold text-slate-700 w-24">รายวิชา:</span>
@@ -1262,7 +999,7 @@ function AdminDashboard() {
                                 }); 
                                 setShowLessonModal(true); 
                               }} className="p-2 text-slate-400 hover:text-primary transition-colors border rounded-xl bg-white shadow-sm" title="แก้ไขบทเรียน"><Edit className="size-4"/></button>
-                              <button onClick={() => handleDeleteLesson(lesson.id)} className="p-2 text-slate-400 hover:text-red-500 transition-colors border rounded-xl bg-white shadow-sm" title="ลบบทเรียน"><Trash2 className="size-4"/></button>
+                              <button onClick={() => handleDeleteLesson(lesson.id)} className="p-2 text-slate-400 hover:text-red-500 transition-colors border rounded-xl bg-white shadow-sm" title="ลบบบทเรียน"><Trash2 className="size-4"/></button>
                             </div>
                           </td>
                         </tr>
@@ -1284,11 +1021,11 @@ function AdminDashboard() {
               <div className="flex items-center gap-3 border-b pb-4"><Filter className="size-5 text-primary" /><h3 className="font-bold text-slate-800">หมวดหมู่ข้อสอบ</h3></div>
               <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-6">
                 <span className="font-semibold text-slate-700 w-24">ระดับชั้น:</span>
-                <div className="flex flex-wrap gap-2">{["ป.4", "ป.5", "ป.6"].map(grade => (<button key={grade} onClick={() => setFilterGrade(grade)} className={`px-5 py-1.5 rounded-full text-sm font-medium transition-colors border ${filterGrade === grade ? 'bg-primary text-white border-primary shadow-sm' : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'}`}>{grade}</button>))}</div>
+                <div className="flex flex-wrap gap-2">{["ทั้งหมด", "ป.4", "ป.5", "ป.6"].map(grade => (<button key={grade} onClick={() => setFilterGrade(grade)} className={`px-5 py-1.5 rounded-full text-sm font-medium transition-colors border ${filterGrade === grade ? 'bg-primary text-white border-primary shadow-sm' : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'}`}>{grade}</button>))}</div>
               </div>
               <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-6">
                 <span className="font-semibold text-slate-700 w-24">แผนการเรียน:</span>
-                <div className="flex flex-wrap gap-2">{["ISM", "EP", "ภาคปกติ"].map(program => (<button key={program} onClick={() => setFilterProgram(program)} className={`px-5 py-1.5 rounded-full text-sm font-medium transition-colors border ${filterProgram === program ? 'bg-primary text-white border-primary shadow-sm' : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'}`}>{program === "ภาคปกติ" ? "ภาคปกติ (Regular)" : `แผน ${program}`}</button>))}</div>
+                <div className="flex flex-wrap gap-2">{["ทั้งหมด", "ISM", "EP", "ภาคปกติ"].map(program => (<button key={program} onClick={() => setFilterProgram(program)} className={`px-5 py-1.5 rounded-full text-sm font-medium transition-colors border ${filterProgram === program ? 'bg-primary text-white border-primary shadow-sm' : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'}`}>{program === "ภาคปกติ" ? "ภาคปกติ (Regular)" : program === "ทั้งหมด" ? "ทั้งหมด" : `แผน ${program}`}</button>))}</div>
               </div>
               <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-6 pt-2">
                 <span className="font-semibold text-slate-700 w-24">รายวิชา:</span>
@@ -1363,11 +1100,11 @@ function AdminDashboard() {
               <div className="flex items-center gap-3 border-b pb-4"><Filter className="size-5 text-primary" /><h3 className="font-bold text-slate-800">หมวดหมู่แบบฝึกหัด</h3></div>
               <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-6">
                 <span className="font-semibold text-slate-700 w-24">ระดับชั้น:</span>
-                <div className="flex flex-wrap gap-2">{["ป.4", "ป.5", "ป.6"].map(grade => (<button key={grade} onClick={() => setFilterGrade(grade)} className={`px-5 py-1.5 rounded-full text-sm font-medium transition-colors border ${filterGrade === grade ? 'bg-primary text-white border-primary shadow-sm' : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'}`}>{grade}</button>))}</div>
+                <div className="flex flex-wrap gap-2">{["ทั้งหมด", "ป.4", "ป.5", "ป.6"].map(grade => (<button key={grade} onClick={() => setFilterGrade(grade)} className={`px-5 py-1.5 rounded-full text-sm font-medium transition-colors border ${filterGrade === grade ? 'bg-primary text-white border-primary shadow-sm' : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'}`}>{grade}</button>))}</div>
               </div>
               <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-6">
                 <span className="font-semibold text-slate-700 w-24">แผนการเรียน:</span>
-                <div className="flex flex-wrap gap-2">{["ISM", "EP", "ภาคปกติ"].map(program => (<button key={program} onClick={() => setFilterProgram(program)} className={`px-5 py-1.5 rounded-full text-sm font-medium transition-colors border ${filterProgram === program ? 'bg-primary text-white border-primary shadow-sm' : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'}`}>{program === "ภาคปกติ" ? "ภาคปกติ (Regular)" : `แผน ${program}`}</button>))}</div>
+                <div className="flex flex-wrap gap-2">{["ทั้งหมด", "ISM", "EP", "ภาคปกติ"].map(program => (<button key={program} onClick={() => setFilterProgram(program)} className={`px-5 py-1.5 rounded-full text-sm font-medium transition-colors border ${filterProgram === program ? 'bg-primary text-white border-primary shadow-sm' : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'}`}>{program === "ภาคปกติ" ? "ภาคปกติ (Regular)" : program === "ทั้งหมด" ? "ทั้งหมด" : `แผน ${program}`}</button>))}</div>
               </div>
               <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-6 pt-2">
                 <span className="font-semibold text-slate-700 w-24">รายวิชา:</span>
@@ -1436,6 +1173,11 @@ function AdminDashboard() {
                 <span className="font-bold text-slate-800 text-sm">การจัดการนักเรียนทั้งหมด ({students.length} คน)</span>
               </div>
               <div className="flex flex-wrap gap-2">
+                <label className={`px-3.5 py-2 rounded-2xl border border-blue-200 bg-blue-50 hover:bg-blue-100 text-blue-800 text-xs font-bold transition flex items-center gap-1.5 shadow-sm cursor-pointer ${isImporting ? "opacity-50" : ""}`}>
+                  {isImporting ? <Loader2 className="size-3.5 animate-spin" /> : <UploadCloud className="size-3.5" />}
+                  {isImporting ? "กำลังนำเข้า..." : "นำเข้าด้วย CSV"}
+                  <input type="file" accept=".csv" className="hidden" disabled={isImporting} onChange={handleImportCSV} />
+                </label>
                 <button onClick={handleExportCSV} className="px-3.5 py-2 rounded-2xl border border-teal-200 bg-teal-50 hover:bg-teal-100 text-teal-800 text-xs font-bold transition flex items-center gap-1.5 shadow-sm">
                   <Download className="size-3.5" /> ส่งออก Excel (CSV)
                 </button>
@@ -2068,13 +1810,20 @@ function AdminDashboard() {
                     </div>
 
                     <div className="space-y-1.5">
-                      <label className="text-xs font-bold text-slate-600">โจทย์คำถาม</label>
+                      <div className="flex items-center justify-between mb-1.5">
+                        <label className="text-xs font-bold text-slate-600">โจทย์คำถาม</label>
+                        <label className="text-[10px] sm:text-xs flex items-center gap-1 bg-indigo-50 hover:bg-indigo-100 text-indigo-600 px-3 py-1.5 rounded-xl font-bold cursor-pointer transition shadow-sm border border-indigo-200">
+                          {scanningQIndex === qIdx ? <Loader2 className="size-3 animate-spin"/> : <Sparkles className="size-3"/>}
+                          {scanningQIndex === qIdx ? "กำลังแกะโจทย์..." : "📷 อัปโหลดรูปเพื่อแกะข้อนี้ใหม่"}
+                          <input type="file" accept="image/*" className="hidden" disabled={scanningQIndex === qIdx} onChange={(e) => handleScanSingleQuestion(qIdx, e)} />
+                        </label>
+                      </div>
                       <textarea 
-                        rows={2}
+                        rows={4}
                         value={q.question}
                         onChange={(e) => updateQuestionText(qIdx, e.target.value)}
                         placeholder="พิมพ์ข้อความโจทย์คำถามที่นี่..."
-                        className="w-full p-3.5 border rounded-2xl text-sm focus:ring-2 focus:ring-primary/20 outline-none font-medium"
+                        className="w-full p-4 border rounded-2xl text-base focus:ring-2 focus:ring-primary/20 outline-none font-medium whitespace-pre-line leading-relaxed"
                       />
                     </div>
 
@@ -2192,10 +1941,10 @@ function AdminDashboard() {
                       </div>
                       
                       <textarea
-                        rows={3}
+                        rows={8}
                         value={q.explanation || ""}
                         onChange={(e) => updateQuestionExplanation(qIdx, e.target.value)}
-                        className="w-full p-3 border border-emerald-300 rounded-2xl text-sm bg-white outline-none focus:ring-1 focus:ring-emerald-500"
+                        className="w-full p-4 border border-emerald-300 rounded-2xl text-base bg-white outline-none focus:ring-2 focus:ring-emerald-500 leading-relaxed whitespace-pre-line"
                       />
                     </div>
 

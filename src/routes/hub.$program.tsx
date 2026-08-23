@@ -1,6 +1,6 @@
 import { createFileRoute, Link, notFound } from "@tanstack/react-router";
 import { useEffect, useState, useRef } from "react";
-import { ChevronRight, FileText, Play, Timer, BookOpen, PenTool, Loader2, Eraser, Sparkles, Video, FilePenLine, ChevronLeft, Layers } from "lucide-react";
+import { ChevronRight, FileText, Play, Timer, BookOpen, PenTool, Loader2, Eraser, Video, FilePenLine, ChevronLeft, Layers } from "lucide-react";
 import { PageShell } from "@/components/PageShell";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -39,42 +39,12 @@ const matchSubject = (dbSubject: string | undefined, selectedSubject: string) =>
   return normalizeSubject(dbSubject) === normalizeSubject(selectedSubject);
 };
 
+// 💡 กระดานทดเลข / ฝึกเขียน (ลบระบบ AI อ่านลายมือออกแล้ว — AI ใช้เฉพาะฝั่ง admin เท่านั้น)
 const SmartPracticeCanvas = ({ subject }: { subject: string }) => {
   const sigCanvas = useRef<any>(null);
-  const [result, setResult] = useState<string>("");
-  const [isChecking, setIsChecking] = useState(false);
 
   const handleClear = () => {
     sigCanvas.current?.clear();
-    setResult("");
-  };
-
-  const handleCheckHandwriting = async () => {
-    if (sigCanvas.current?.isEmpty()) return;
-    setIsChecking(true);
-    setResult("");
-
-    try {
-      const imageBase64 = sigCanvas.current?.getTrimmedCanvas().toDataURL("image/jpeg", 0.9).split(",")[1];
-      const prompt = `อ่านลายมือในรูปภาพนี้ (อาจจะเป็นตัวเลข, ภาษาอังกฤษ หรือภาษาไทย) ตอบกลับมาเฉพาะคำหรือตัวเลขที่อ่านได้อย่างแม่นยำที่สุด ห้ามมีคำอธิบายเพิ่มเติม หากอ่านไม่ออกให้ตอบว่า '-'`;
-
-      const response = await fetch(`/api/gemini`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          model: "gemini-2.5-flash",
-          contents: [{ parts: [{ text: prompt }, { inline_data: { mime_type: "image/jpeg", data: imageBase64 } }] }],
-        }),
-      });
-
-      const data = await response.json();
-      const text = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || "ไม่สามารถอ่านได้";
-      setResult(text);
-    } catch (error) {
-      setResult("เกิดข้อผิดพลาดในการเชื่อมต่อ AI");
-    } finally {
-      setIsChecking(false);
-    }
   };
 
   return (
@@ -83,9 +53,6 @@ const SmartPracticeCanvas = ({ subject }: { subject: string }) => {
         <h4 className="font-bold text-amber-900 flex items-center gap-2 text-xs sm:text-sm">
           <PenTool className="size-4 text-amber-600" /> สมุดทดเลข / ฝึกเขียน ({subject})
         </h4>
-        <span className="text-[10px] sm:text-xs font-bold text-amber-700 bg-amber-200/60 px-2.5 py-0.5 rounded-full">
-          AI Powered
-        </span>
       </div>
 
       <div
@@ -104,40 +71,13 @@ const SmartPracticeCanvas = ({ subject }: { subject: string }) => {
         />
       </div>
 
-      <div className="mt-3 flex flex-col sm:flex-row items-center gap-2.5">
-        <div className="flex gap-2 w-full sm:w-auto">
-          <button
-            onClick={handleClear}
-            className="flex-1 sm:flex-initial px-4 py-2 rounded-xl border border-amber-300 text-amber-800 bg-white/80 hover:bg-white text-xs font-bold transition shadow-sm active:scale-95 flex items-center justify-center gap-1.5"
-          >
-            <Eraser className="size-3.5" /> ล้าง
-          </button>
-          <button
-            onClick={handleCheckHandwriting}
-            disabled={isChecking}
-            className="flex-1 sm:flex-initial px-4 py-2 rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 text-white font-bold text-xs transition disabled:opacity-50 shadow-[0_3px_0_0_#b45309] active:translate-y-0.5 active:shadow-none flex items-center justify-center gap-1.5"
-          >
-            {isChecking ? <Loader2 className="size-3.5 animate-spin" /> : <Sparkles className="size-3.5" />}
-            AI อ่านลายมือ
-          </button>
-        </div>
-
-        <div className="flex-1 w-full bg-white/90 p-2 rounded-2xl border border-amber-200/80 min-h-[40px] flex items-center px-3 shadow-inner">
-          {isChecking ? (
-            <span className="text-xs text-slate-400 animate-pulse flex items-center gap-1.5">
-              <Loader2 className="size-3.5 animate-spin" /> กำลังอ่านลายมือ...
-            </span>
-          ) : result ? (
-            <span className="text-xs font-bold text-emerald-700 flex items-center gap-2">
-              ผลลัพธ์:
-              <span className="text-xs sm:text-sm text-emerald-900 font-black bg-emerald-100/80 px-2 py-0.5 rounded-lg">
-                {result}
-              </span>
-            </span>
-          ) : (
-            <span className="text-xs text-slate-400">ผลการอ่านจะแสดงที่นี่...</span>
-          )}
-        </div>
+      <div className="mt-3 flex items-center gap-2.5">
+        <button
+          onClick={handleClear}
+          className="px-4 py-2 rounded-xl border border-amber-300 text-amber-800 bg-white/80 hover:bg-white text-xs font-bold transition shadow-sm active:scale-95 flex items-center justify-center gap-1.5"
+        >
+          <Eraser className="size-3.5" /> ล้างกระดาน
+        </button>
       </div>
     </div>
   );

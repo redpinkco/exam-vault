@@ -5,7 +5,7 @@ export default async function handler(req: any, res: any) {
   }
 
   try {
-    const { contents, model = "gemini-2.5-flash" } = req.body;
+    const { contents, model = "gemini-3.6-flash" } = req.body;
 
     const apiKey = process.env['GEMINI_API_KEY'];
 
