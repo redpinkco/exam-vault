@@ -76,7 +76,7 @@ function StudentDashboard() {
       <PageShell>
         <div className="min-h-[60vh] flex flex-col items-center justify-center text-slate-400 gap-3">
           <Loader2 className="size-8 animate-spin text-primary" />
-          <p className="text-sm font-semibold">กำลังวิเคราะห์ข้อมูลด้วย AI...</p>
+          <p className="text-sm font-semibold">กำลังประมวลผลสถิติและคะแนน...</p>
         </div>
       </PageShell>
     );

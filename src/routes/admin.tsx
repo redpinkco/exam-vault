@@ -2,11 +2,12 @@ import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useState, useEffect, useMemo } from "react";
 import { 
   LayoutDashboard, BookOpen, Users, PlusCircle, Edit, 
-  Trash2, UploadCloud, FileText, X, BarChart3, Mail, Phone, Lock, Save, History, 
+  Trash2, UploadCloud, FileText, X, BarChart3, Mail, Lock, Save, History, 
   Image as ImageIcon, Sparkles, ChevronLeft, Filter, Unlock, LogOut,
   GraduationCap, Video, CheckCircle2, Plus, AlignLeft, CheckSquare,
   Lightbulb, ShieldCheck, AlertTriangle, FilePenLine, Loader2, RefreshCw, 
-  AlertOctagon, Download, Copy, Key, Shuffle, FileDown
+  AlertOctagon, Download, Copy, Key, Shuffle, FileDown, FileSpreadsheet, Search,
+  RotateCcw, ShieldAlert, PieChart, TrendingDown
 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { Document, Packer, Paragraph, TextRun, HeadingLevel, AlignmentType } from "docx";
@@ -45,29 +46,36 @@ const safeGetArray = (val: any): string[] => {
 function AdminDashboard() {
   const navigate = useNavigate(); 
   const [isAuthChecking, setIsAuthChecking] = useState(true);
-  const [activeTab, setActiveTab] = useState<"dashboard" | "lessons" | "exams" | "users" | "worksheets" | "codes">("exams");
+  
+  // แท็บทั้งหมดของระบบ Admin ครบทุกฟังก์ชัน
+  const [activeTab, setActiveTab] = useState<"dashboard" | "lessons" | "exams" | "trash_exams" | "analytics" | "bulk_exam" | "users" | "worksheets" | "codes" | "reports">("exams");
 
+  // State: นักเรียน
   const [students, setStudents] = useState<any[]>([]);
   const [selectedStudent, setSelectedStudent] = useState<any>(null);
   const [showStudentModal, setShowStudentModal] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
-  const [formData, setFormData] = useState({ id: 0, name: "", email: "", password: "", phone: "", permissions: defaultPermissions });
-  
+  const [formData, setFormData] = useState({ id: 0, name: "", email: "", password: "", phone: "", is_active: true, permissions: defaultPermissions });
+  const [searchStudent, setSearchStudent] = useState("");
+  const [savingStudentId, setSavingStudentId] = useState<number | null>(null);
   const [isImporting, setIsImporting] = useState(false);
 
+  // State: บทเรียน
   const [lessons, setLessons] = useState<any[]>([]);
   const [showLessonModal, setShowLessonModal] = useState(false);
   const [lessonFormData, setLessonFormData] = useState({
     id: 0, title: "", grade: ["ป.6"], program: ["ISM"], subject: "คณิตศาสตร์", video_url: "", pdf_url: "", description: ""
   });
 
+  // State: ข้อสอบ
   const [exams, setExams] = useState<any[]>([]);
+  const [trashExams, setTrashExams] = useState<any[]>([]);
   const [editingExamId, setEditingExamId] = useState<number | null>(null);
   const [examModalMode, setExamModalMode] = useState<"none" | "select" | "exam_info" | "ai" | "manual" | "ai_result">("none");
   const [newExamInfo, setNewExamInfo] = useState<{ 
     title: string; grade: string[]; program: string[]; subject: string; year: string; is_timed: boolean; duration_minutes: number; shuffle_questions?: boolean;
   }>({ 
-    title: "", grade: ["ป.6"], program: ["ISM"], subject: "คณิตศาสตร์", year: "2566", is_timed: true, duration_minutes: 90, shuffle_questions: false 
+    title: "", grade: ["ป.6"], program: ["ISM"], subject: "คณิตศาสตร์", year: "2567", is_timed: true, duration_minutes: 90, shuffle_questions: false 
   });
   
   const [manualQuestions, setManualQuestions] = useState<QuestionItem[]>([
@@ -75,14 +83,28 @@ function AdminDashboard() {
   ]);
   
   const [generatingExpId, setGeneratingExpId] = useState<number | null>(null);
-  
-  // ✅ State สำหรับสแกนเฉพาะข้อ
   const [scanningQIndex, setScanningQIndex] = useState<number | null>(null);
 
   const [previewImages, setPreviewImages] = useState<string[]>([]);
   const [isAiProcessing, setIsAiProcessing] = useState(false);
   const [aiResult, setAiResult] = useState<QuestionItem[] | null>(null);
 
+  // State: นำเข้าข้อสอบชุดใหญ่ (Bulk JSON Import)
+  const [bulkExamForm, setBulkExamForm] = useState({
+    title: "",
+    subject: "คณิตศาสตร์",
+    grade: ["ป.6"],
+    program: ["EP"],
+    year: "2567",
+    duration_minutes: 90,
+    is_timed: true,
+    shuffle_questions: false
+  });
+  const [rawQuestionsJson, setRawQuestionsJson] = useState("");
+  const [bulkImportStatus, setBulkImportStatus] = useState<string | null>(null);
+  const [isBulkImporting, setIsBulkImporting] = useState(false);
+
+  // State: แบบฝึกหัด
   const [worksheets, setWorksheets] = useState<any[]>([]);
   const [showWorksheetModal, setShowWorksheetModal] = useState(false);
   const [worksheetFormData, setWorksheetFormData] = useState({
@@ -90,10 +112,15 @@ function AdminDashboard() {
   });
   const [isUploading, setIsUploading] = useState(false);
 
+  // State: Access Codes
   const [accessCodes, setAccessCodes] = useState<any[]>([]);
   const [newCodeName, setNewCodeName] = useState("");
   const [newCodePerms, setNewCodePerms] = useState(defaultPermissions);
 
+  // State: รายงานผลสอบ Submissions
+  const [submissions, setSubmissions] = useState<any[]>([]);
+
+  // State: Filters
   const [filterGrade, setFilterGrade] = useState("ทั้งหมด");
   const [filterProgram, setFilterProgram] = useState("ทั้งหมด");
   const [filterSubject, setFilterSubject] = useState("ทั้งหมด");
@@ -120,7 +147,8 @@ function AdminDashboard() {
         fetchExams(),
         fetchLessons(),
         fetchWorksheets(),
-        fetchAccessCodes()
+        fetchAccessCodes(),
+        fetchSubmissions()
       ]);
 
       setIsAuthChecking(false);
@@ -152,7 +180,12 @@ function AdminDashboard() {
 
   const fetchExams = async () => {
     const { data, error } = await supabase.from('exams').select('*').order('id', { ascending: false });
-    if (!error && data) setExams(data);
+    if (!error && data) {
+      const active = data.filter(e => e.status !== "archived");
+      const trashed = data.filter(e => e.status === "archived");
+      setExams(active);
+      setTrashExams(trashed);
+    }
   };
 
   const fetchLessons = async () => {
@@ -170,6 +203,11 @@ function AdminDashboard() {
     if (data) setAccessCodes(data);
   };
 
+  const fetchSubmissions = async () => {
+    const { data } = await supabase.from('exam_submissions').select('*').order('created_at', { ascending: false }).limit(200);
+    if (data) setSubmissions(data);
+  };
+
   const uploadImageToStorage = async (file: File, folderName: string): Promise<string> => {
     const options = { maxSizeMB: 0.5, maxWidthOrHeight: 1200, useWebWorker: true, fileType: "image/jpeg" };
     let processedFile = file;
@@ -182,6 +220,92 @@ function AdminDashboard() {
     const { data: { publicUrl } } = supabase.storage.from('exam-vault-images').getPublicUrl(fileName);
     return publicUrl;
   };
+
+  const handleForceResetPassword = async (student: any) => {
+    if (!confirm(`คุณต้องการรีเซ็ตรหัสผ่านของ ${student.name || student.email} เป็น '12345678' ใช่หรือไม่?`)) return;
+    try {
+      const { error } = await supabase.auth.admin.updateUserById(student.id, {
+        password: "12345678"
+      });
+      if (error) throw error;
+      alert(`✅ รีเซ็ตรหัสผ่านของ ${student.name || student.email} เป็น '12345678' เรียบร้อย!`);
+    } catch (e: any) {
+      alert(`การรีเซ็ตรหัสผ่านจำเป็นต้องเปิดสิทธิ์ Service Role ใน Supabase: ${e.message}`);
+    }
+  };
+
+  const handleToggleStudentActive = async (student: any) => {
+    const newStatus = student.is_active === false ? true : false;
+    try {
+      const { error } = await supabase
+        .from('students')
+        .update({ is_active: newStatus })
+        .eq('id', student.id);
+      if (error) throw error;
+      
+      setStudents(prev => prev.map(s => s.id === student.id ? { ...s, is_active: newStatus } : s));
+      if (selectedStudent?.id === student.id) {
+        setSelectedStudent({ ...selectedStudent, is_active: newStatus });
+      }
+      alert(`อัปเดตสถานะบัญชีเป็น ${newStatus ? 'เปิดใช้งาน' : 'ระงับการใช้งาน'} สำเร็จ`);
+    } catch (e: any) {
+      alert(`เกิดข้อผิดพลาด: ${e.message}`);
+    }
+  };
+
+  const handleSoftDeleteExam = async (examId: number) => {
+    if (!confirm("คุณต้องการย้ายข้อสอบชุดนี้ไปไว้ใน 'ถังขยะ' ใช่หรือไม่?")) return;
+    const { error } = await supabase.from('exams').update({ status: 'archived' }).eq('id', examId);
+    if (error) alert("เกิดข้อผิดพลาด: " + error.message);
+    else {
+      alert("ย้ายข้อสอบเข้าถังขยะเรียบร้อย (สามารถกู้คืนได้ที่แท็บถังขยะ)");
+      fetchExams();
+    }
+  };
+
+  const handleRestoreExam = async (examId: number) => {
+    const { error } = await supabase.from('exams').update({ status: 'published' }).eq('id', examId);
+    if (error) alert("เกิดข้อผิดพลาด: " + error.message);
+    else {
+      alert("กู้คืนข้อสอบกลับสู่ระบบเรียบร้อย");
+      fetchExams();
+    }
+  };
+
+  const handlePermanentDeleteExam = async (examId: number) => {
+    if (!confirm("🚨 ลบข้อสอบชุดนี้ออกจากระบบอย่างถาวร? การกระทำนี้ไม่สามารถย้อนกลับได้!")) return;
+    const { error } = await supabase.from('exams').delete().eq('id', examId);
+    await supabase.from('exam_submissions').delete().eq('exam_id', examId);
+    if (!error) {
+      alert("ลบข้อสอบถาวรเรียบร้อยแล้ว");
+      fetchExams();
+    }
+  };
+
+  const hardestQuestionsStats = useMemo(() => {
+    const mistakeMap: Record<string, { question: string; subject: string; examTitle: string; count: number }> = {};
+
+    students.forEach(s => {
+      (Array.isArray(s.examHistory) ? s.examHistory : []).forEach((h: any) => {
+        (Array.isArray(h.mistakes) ? h.mistakes : []).forEach((m: any) => {
+          const key = `${m.exam_id}_${m.qIndex}`;
+          if (!mistakeMap[key]) {
+            mistakeMap[key] = {
+              question: m.question,
+              subject: m.subject || h.subject || "ทั่วไป",
+              examTitle: m.exam_title || h.title || "ข้อสอบ",
+              count: 0
+            };
+          }
+          mistakeMap[key].count += 1;
+        });
+      });
+    });
+
+    return Object.values(mistakeMap)
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 10);
+  }, [students]);
 
   const handleExportWord = async (exam: any, includeSolutions: boolean = false) => {
     const questions: QuestionItem[] = Array.isArray(exam.questions) ? exam.questions : [];
@@ -229,9 +353,9 @@ function AdminDashboard() {
 
   const handleExportCSV = () => {
     if (students.length === 0) return alert("ไม่มีข้อมูลนักเรียนให้ส่งออก");
-    const headers = ["ID", "ชื่อ-นามสกุล", "อีเมล", "เบอร์โทร", "คะแนนเฉลี่ยคณิต", "คะแนนเฉลี่ยวิทย์", "คะแนนเฉลี่ยอังกฤษ", "จำนวนข้อสอบที่ทำ"];
+    const headers = ["ID", "ชื่อ-นามสกุล", "อีเมล", "เบอร์โทร", "สถานะ", "คะแนนเฉลี่ยคณิต", "คะแนนเฉลี่ยวิทย์", "คะแนนเฉลี่ยอังกฤษ", "จำนวนข้อสอบที่ทำ"];
     const rows = students.map(s => [
-      s.id, `"${s.name || ""}"`, `"${s.email || ""}"`, `"${s.phone || ""}"`,
+      s.id, `"${s.name || ""}"`, `"${s.email || ""}"`, `"${s.phone || ""}"`, s.is_active === false ? "ระงับ" : "ปกติ",
       s.scores?.math || 0, s.scores?.science || 0, s.scores?.english || 0, (s.examHistory || []).length
     ]);
     const csvContent = "data:text/csv;charset=utf-8,\uFEFF" + [headers.join(","), ...rows.map(e => e.join(","))].join("\n");
@@ -239,6 +363,32 @@ function AdminDashboard() {
     const link = document.createElement("a");
     link.setAttribute("href", encodedUri); link.setAttribute("download", `exam_vault_students_${new Date().toISOString().slice(0, 10)}.csv`);
     document.body.appendChild(link); link.click(); document.body.removeChild(link);
+  };
+
+  const handleExportSubmissionsCSV = () => {
+    if (submissions.length === 0) return alert("ไม่มีข้อมูลผลสอบสำหรับส่งออก");
+    const headers = ["ID", "Student Name", "Subject", "Program", "Year", "Score", "Total", "Percentage", "Date"];
+    const rows = submissions.map(s => [
+      s.id,
+      `"${(s.student_name || "").replace(/"/g, '""')}"`,
+      `"${s.subject || ""}"`,
+      `"${s.program || ""}"`,
+      s.year || "",
+      s.score || 0,
+      s.total || 0,
+      `${s.percentage || 0}%`,
+      `"${s.created_at || ""}"`
+    ]);
+
+    const csvContent = "\uFEFF" + [headers.join(","), ...rows.map(e => e.join(","))].join("\n");
+    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.setAttribute("href", url);
+    link.setAttribute("download", `exam_results_export_${Date.now()}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
   };
 
   const handleImportCSV = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -264,7 +414,7 @@ function AdminDashboard() {
           const { error: authError } = await supabase.auth.signUp({ email, password });
           if (authError) { failCount++; continue; }
 
-          const { error: dbError } = await supabase.from('students').insert([{ name, email, phone, permissions: defaultPermissions, scores: { math: 0, english: 0, science: 0, thai: 0, social: 0 }, examHistory: [] }]);
+          const { error: dbError } = await supabase.from('students').insert([{ name, email, phone, is_active: true, permissions: defaultPermissions, scores: { math: 0, english: 0, science: 0, thai: 0, social: 0 }, examHistory: [] }]);
           if (!dbError) successCount++; else failCount++;
         }
         if (adminSession) await supabase.auth.setSession({ access_token: adminSession.access_token, refresh_token: adminSession.refresh_token });
@@ -274,6 +424,109 @@ function AdminDashboard() {
       },
       error: (err: any) => { alert("เกิดข้อผิดพลาดในการอ่านไฟล์ CSV: " + err.message); setIsImporting(false); e.target.value = ""; }
     });
+  };
+
+  const handleBulkImportExam = async () => {
+    if (!bulkExamForm.title.trim()) {
+      alert("กรุณากรอกชื่อชุดข้อสอบ");
+      return;
+    }
+
+    let parsedQuestions: any[] = [];
+    try {
+      parsedQuestions = JSON.parse(rawQuestionsJson);
+      if (!Array.isArray(parsedQuestions) || parsedQuestions.length === 0) {
+        throw new Error("รูปแบบต้องเป็น Array ของคำถาม และมีอย่างน้อย 1 ข้อ");
+      }
+    } catch (e: any) {
+      alert(`❌ รูปแบบ JSON ไม่ถูกต้อง:\n${e.message}`);
+      return;
+    }
+
+    setIsBulkImporting(true);
+    setBulkImportStatus("กำลังนำเข้าข้อสอบเข้าสู่ Supabase...");
+
+    try {
+      const payload = {
+        title: bulkExamForm.title,
+        subject: bulkExamForm.subject,
+        grade: bulkExamForm.grade.join(", "),
+        program: bulkExamForm.program.join(", "),
+        year: bulkExamForm.year,
+        duration_minutes: Number(bulkExamForm.duration_minutes),
+        is_timed: bulkExamForm.is_timed,
+        shuffle_questions: bulkExamForm.shuffle_questions,
+        status: "published",
+        total_questions: parsedQuestions.length,
+        questions: parsedQuestions
+      };
+
+      const { error } = await supabase.from("exams").insert([payload]);
+      if (error) throw error;
+
+      setBulkImportStatus(`🎉 นำเข้าข้อสอบชุด "${bulkExamForm.title}" (${parsedQuestions.length} ข้อ) สำเร็จเรียบร้อย!`);
+      setRawQuestionsJson("");
+      setBulkExamForm(prev => ({ ...prev, title: "" }));
+      fetchExams();
+    } catch (e: any) {
+      setBulkImportStatus(`❌ เกิดข้อผิดพลาด: ${e.message}`);
+    } finally {
+      setIsBulkImporting(false);
+    }
+  };
+
+  const loadSampleJson = () => {
+    const sample = [
+      {
+        type: "choice",
+        question: "ถ้า 2x + 5 = 15 แล้ว x มีค่าเท่าใด?",
+        options: ["3", "4", "5", "6"],
+        correct_index: 2,
+        explanation: "ย้ายข้างสมการ: 2x = 15 - 5\n2x = 10\nx = 5",
+        image_url: ""
+      },
+      {
+        type: "subjective",
+        question: "จงหาพื้นที่รูปสี่เหลี่ยมจัตุรัสที่มีความยาวด้านละ 8 เซนติเมตร (ตอบเฉพาะตัวเลข)",
+        subjective_answers: ["64", "64 ตร.ซม."],
+        explanation: "สูตรพื้นที่สี่เหลี่ยมจัตุรัส = ด้าน × ด้าน\n= 8 × 8 = 64 ตารางเซนติเมตร",
+        image_url: ""
+      }
+    ];
+    setRawQuestionsJson(JSON.stringify(sample, null, 2));
+  };
+
+  const handleQuickToggleStudentPermission = (studentId: number, permKey: string) => {
+    setStudents(prev => prev.map(s => {
+      if (s.id === studentId) {
+        const currentPerms = s.permissions || {};
+        return {
+          ...s,
+          permissions: {
+            ...currentPerms,
+            [permKey]: !currentPerms[permKey]
+          }
+        };
+      }
+      return s;
+    }));
+  };
+
+  const handleQuickSaveStudentPermission = async (student: any) => {
+    setSavingStudentId(student.id);
+    try {
+      const { error } = await supabase
+        .from("students")
+        .update({ permissions: student.permissions })
+        .eq("id", student.id);
+
+      if (error) throw error;
+      alert(`✅ บันทึกสิทธิ์ของ ${student.name || student.email} สำเร็จ!`);
+    } catch (e: any) {
+      alert(`เกิดข้อผิดพลาด: ${e.message}`);
+    } finally {
+      setSavingStudentId(null);
+    }
   };
 
   const handleDuplicateExam = async (exam: any) => {
@@ -304,14 +557,14 @@ function AdminDashboard() {
     }
   };
 
-  const handleOpenAddStudent = () => { setFormData({ id: 0, name: "", email: "", password: "", phone: "", permissions: defaultPermissions }); setIsEditing(false); setShowStudentModal(true); };
-  const handleOpenEditStudent = (student: any) => { setFormData({ ...student, password: "", permissions: student.permissions || defaultPermissions }); setIsEditing(true); setShowStudentModal(true); };
+  const handleOpenAddStudent = () => { setFormData({ id: 0, name: "", email: "", password: "", phone: "", is_active: true, permissions: defaultPermissions }); setIsEditing(false); setShowStudentModal(true); };
+  const handleOpenEditStudent = (student: any) => { setFormData({ ...student, password: "", is_active: student.is_active !== false, permissions: student.permissions || defaultPermissions }); setIsEditing(true); setShowStudentModal(true); };
   const handleTogglePermission = (key: string) => { setFormData(prev => ({ ...prev, permissions: { ...prev.permissions, [key]: !prev.permissions[key as keyof typeof prev.permissions] } })); };
 
   const handleSaveStudent = async (e: React.FormEvent) => {
     e.preventDefault();
     if (formData.id) {
-      const { error } = await supabase.from('students').update({ name: formData.name, email: formData.email, phone: formData.phone, permissions: formData.permissions }).eq('id', formData.id);
+      const { error } = await supabase.from('students').update({ name: formData.name, email: formData.email, phone: formData.phone, is_active: formData.is_active, permissions: formData.permissions }).eq('id', formData.id);
       if (error) alert("เกิดข้อผิดพลาดในการอัปเดต: " + error.message);
       else { alert("อัปเดตข้อมูลและสิทธิ์นักเรียนสำเร็จ!"); fetchStudents(); if (selectedStudent?.id === formData.id) setSelectedStudent({ ...selectedStudent, ...formData }); }
     } else {
@@ -319,7 +572,7 @@ function AdminDashboard() {
       const { error: authError } = await supabase.auth.signUp({ email: formData.email, password: formData.password });
       if (authError) return alert("ไม่สามารถสร้างบัญชีได้: " + authError.message);
       if (adminSession) await supabase.auth.setSession({ access_token: adminSession.access_token, refresh_token: adminSession.refresh_token });
-      const { error } = await supabase.from('students').insert([{ name: formData.name, email: formData.email, phone: formData.phone, permissions: formData.permissions, scores: { math: 0, english: 0, science: 0, thai: 0, social: 0 }, examHistory: [] }]);
+      const { error } = await supabase.from('students').insert([{ name: formData.name, email: formData.email, phone: formData.phone, is_active: true, permissions: formData.permissions, scores: { math: 0, english: 0, science: 0, thai: 0, social: 0 }, examHistory: [] }]);
       if (error) alert("เกิดข้อผิดพลาด: " + error.message); else { alert("สร้างบัญชีนักเรียนสำเร็จ!"); fetchStudents(); }
     }
     setShowStudentModal(false);
@@ -484,9 +737,7 @@ function AdminDashboard() {
     });
   };
 
-  // ✅ ฟังก์ชันใหม่: สแกนเฉพาะข้อ
   const handleScanSingleQuestion = async (qIndex: number, e: React.ChangeEvent<HTMLInputElement>) => {
-    // 👇 แก้ไข: เพิ่มการเช็กไฟล์ให้ TypeScript มั่นใจว่ามีไฟล์จริงๆ
     const file = e.target.files?.[0];
     if (!file) return; 
     
@@ -496,7 +747,7 @@ function AdminDashboard() {
         const reader = new FileReader();
         reader.onloadend = () => resolve(reader.result?.toString().split(',')[1] || "");
         reader.onerror = reject;
-        reader.readAsDataURL(file); // ขีดแดงตรงนี้จะหายไปครับ
+        reader.readAsDataURL(file);
       });
 
       const promptText = `วิเคราะห์รูปภาพโจทย์ข้อสอบ (1 ข้อ) แล้วแปลงข้อมูลเป็นรูปแบบ JSON
@@ -509,8 +760,8 @@ function AdminDashboard() {
   "explanation": "เฉลยวิธีทำ (ถ้ามีในรูป)"
 }
 คำแนะนำสำคัญ (ข้อควรระวัง): 
-1. ⚠️ ในฟิลด์ options ให้ใส่เฉพาะ "เนื้อหาคำตอบ" เท่านั้น ห้ามใส่ ก. ข. ค. ง. จ. นำหน้าเด็ดขาด!
-2. ⚠️ หากโจทย์มีสัญลักษณ์ทางคณิตศาสตร์ ให้ใช้สัญลักษณ์ตามนี้แทน ห้ามใช้ LaTeX หรือ $: มุมพิมพ์ ∠, องศาพิมพ์ °, ขนานพิมพ์ //, เศษส่วนพิมพ์ 1/2 หรือ ½, ยกกำลังพิมพ์ ^2 หรือ ²
+1. ในฟิลด์ options ให้ใส่เฉพาะ "เนื้อหาคำตอบ" เท่านั้น ห้ามใส่ ก. ข. ค. ง. จ. นำหน้าเด็ดขาด!
+2. หากโจทย์มีสัญลักษณ์ทางคณิตศาสตร์ ให้ใช้สัญลักษณ์ตามนี้แทน ห้ามใช้ LaTeX หรือ $: มุมพิมพ์ ∠, องศาพิมพ์ °, ขนานพิมพ์ //, เศษส่วนพิมพ์ 1/2 หรือ ½, ยกกำลังพิมพ์ ^2 หรือ ²
 3. ตอบกลับมาเป็นโครงสร้าง JSON เพียวๆ เท่านั้น ห้ามมีคำอธิบายเพิ่มเติม`;
 
       const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
@@ -596,8 +847,7 @@ function AdminDashboard() {
       const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
       if (!apiKey) throw new Error("ไม่พบ API Key กรุณาตรวจสอบไฟล์ .env");
 
-      // คงชื่อโมเดลไว้ตามที่คุณใช้งานได้ปกติ
-      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key=${apiKey}`, { 
+      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${apiKey}`, { 
         method: "POST", 
         headers: { "Content-Type": "application/json" }, 
         body: JSON.stringify({ contents: [{ parts: requestParts }] }) 
@@ -655,17 +905,16 @@ function AdminDashboard() {
   "explanation": "เขียนคำอธิบายเฉลยและวิธีทำอย่างละเอียด แสดงขั้นตอนการคิดคำนวณ สูตร หรือเหตุผลอย่างชัดเจน"
 }
 คำแนะนำสำคัญ (ข้อควรระวัง): 
-1. ⚠️ ในฟิลด์ options ให้ใส่เฉพาะ "เนื้อหาคำตอบ" เท่านั้น ห้ามใส่ตัวอักษร ก. ข. ค. ง. จ. นำหน้าเด็ดขาด!
-2. ⚠️ หากโจทย์ข้อนั้นมี "รูปภาพเรขาคณิต" ประกอบโจทย์ หรือในโจทย์มีคำว่า "จากรูป" ให้ใส่ค่าในฟิลด์ image_url เป็น "NEEDS_IMAGE" เพื่อแจ้งเตือนระบบ
+1. ในฟิลด์ options ให้ใส่เฉพาะ "เนื้อหาคำตอบ" เท่านั้น ห้ามใส่ตัวอักษร ก. ข. ค. ง. จ. นำหน้าเด็ดขาด!
+2. หากโจทย์ข้อนั้นมี "รูปภาพเรขาคณิต" ประกอบโจทย์ หรือในโจทย์มีคำว่า "จากรูป" ให้ใส่ค่าในฟิลด์ image_url เป็น "NEEDS_IMAGE" เพื่อแจ้งเตือนระบบ
 3. หากเฉลยในรูปมีการโยงลูกศรแบบรูปภาพ ให้เขียนอธิบายเป็น text ในช่อง explanation แทนการแปลงเป็นเครื่องหมายแปลกๆ
 4. ตอบกลับมาเป็นโครงสร้าง JSON เพียวๆ เท่านั้น ห้ามใส่ markdown code block
-5. ⚠️ ห้ามใช้โค้ด LaTeX หรือสัญลักษณ์ $ ในการเขียนสมการเด็ดขาด ให้พิมพ์เป็นข้อความธรรมดา หรือสัญลักษณ์แบบ Unicode แทน (เช่น เศษส่วนพิมพ์ 1/2, ยกกำลังพิมพ์ ^2, องศาพิมพ์ °, ขนานพิมพ์ //)`;
+5. ห้ามใช้โค้ด LaTeX หรือสัญลักษณ์ $ ในการเขียนสมการเด็ดขาด ให้พิมพ์เป็นข้อความธรรมดา หรือสัญลักษณ์แบบ Unicode แทน (เช่น เศษส่วนพิมพ์ 1/2, ยกกำลังพิมพ์ ^2, องศาพิมพ์ °, ขนานพิมพ์ //)`;
 
       const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
       if (!apiKey) throw new Error("ไม่พบ API Key กรุณาตรวจสอบไฟล์ .env");
 
-      // คงชื่อโมเดลไว้ตามที่คุณใช้งานได้ปกติ
-      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key=${apiKey}`, { 
+      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${apiKey}`, { 
         method: "POST", 
         headers: { "Content-Type": "application/json" }, 
         body: JSON.stringify({ contents: [{ parts: [{ text: promptText }, ...imageParts] }] }) 
@@ -820,7 +1069,6 @@ function AdminDashboard() {
   const matchFilterGrade = (itemGrades: string[], filterG: string) => filterG === "ทั้งหมด" || itemGrades.includes(filterG);
   const matchFilterProgram = (itemPrograms: string[], filterP: string) => filterP === "ทั้งหมด" || itemPrograms.includes(filterP);
 
-  // ✅ ใช้ useMemo เพื่อป้องกันไม่ให้ระบบคำนวณใหม่ทุกครั้งที่พิมพ์หรือกดปุ่มอื่น
   const filteredExams = useMemo(() => {
     return exams.filter(exam => {
       return matchFilterGrade(safeGetArray(exam.grade), filterGrade) && 
@@ -845,6 +1093,13 @@ function AdminDashboard() {
     });
   }, [worksheets, filterGrade, filterProgram, filterSubject]);
 
+  const filteredStudents = useMemo(() => {
+    return students.filter(s => 
+      (s.name && s.name.toLowerCase().includes(searchStudent.toLowerCase())) ||
+      (s.email && s.email.toLowerCase().includes(searchStudent.toLowerCase()))
+    );
+  }, [students, searchStudent]);
+
   const choiceLabels = ["ก.", "ข.", "ค.", "ง.", "จ."];
 
   if (isAuthChecking) {
@@ -868,11 +1123,15 @@ function AdminDashboard() {
           </h2>
           <nav className="flex flex-col space-y-1.5">
             <button onClick={() => setActiveTab("dashboard")} className={`flex items-center gap-3 rounded-2xl p-3 font-bold transition-all ${activeTab === "dashboard" ? "bg-primary/10 text-primary shadow-sm" : "text-slate-500 hover:bg-slate-100"}`}><LayoutDashboard className="size-5" /> ภาพรวมระบบ</button>
-            <button onClick={() => setActiveTab("lessons")} className={`flex items-center gap-3 rounded-2xl p-3 font-bold transition-all ${activeTab === "lessons" ? "bg-primary/10 text-primary shadow-sm" : "text-slate-500 hover:bg-slate-100"}`}><GraduationCap className="size-5" /> จัดการเนื้อหาบทเรียน</button>
+            <button onClick={() => setActiveTab("analytics")} className={`flex items-center gap-3 rounded-2xl p-3 font-bold transition-all ${activeTab === "analytics" ? "bg-rose-50 text-rose-600 shadow-sm" : "text-slate-500 hover:bg-slate-100"}`}><PieChart className="size-5 text-rose-500" /> วิเคราะห์จุดอ่อนข้อสอบ</button>
             <button onClick={() => setActiveTab("exams")} className={`flex items-center gap-3 rounded-2xl p-3 font-bold transition-all ${activeTab === "exams" ? "bg-primary/10 text-primary shadow-sm" : "text-slate-500 hover:bg-slate-100"}`}><BookOpen className="size-5" /> จัดการข้อสอบ</button>
+            <button onClick={() => setActiveTab("trash_exams")} className={`flex items-center gap-3 rounded-2xl p-3 font-bold transition-all ${activeTab === "trash_exams" ? "bg-amber-50 text-amber-700 shadow-sm" : "text-slate-500 hover:bg-slate-100"}`}><Trash2 className="size-5 text-amber-600" /> ถังขยะข้อสอบ ({trashExams.length})</button>
+            <button onClick={() => setActiveTab("bulk_exam")} className={`flex items-center gap-3 rounded-2xl p-3 font-bold transition-all ${activeTab === "bulk_exam" ? "bg-primary/10 text-primary shadow-sm" : "text-slate-500 hover:bg-slate-100"}`}><UploadCloud className="size-5" /> นำเข้าข้อสอบชุดใหญ่ (JSON)</button>
+            <button onClick={() => setActiveTab("lessons")} className={`flex items-center gap-3 rounded-2xl p-3 font-bold transition-all ${activeTab === "lessons" ? "bg-primary/10 text-primary shadow-sm" : "text-slate-500 hover:bg-slate-100"}`}><GraduationCap className="size-5" /> จัดการเนื้อหาบทเรียน</button>
             <button onClick={() => setActiveTab("worksheets")} className={`flex items-center gap-3 rounded-2xl p-3 font-bold transition-all ${activeTab === "worksheets" ? "bg-primary/10 text-primary shadow-sm" : "text-slate-500 hover:bg-slate-100"}`}><FilePenLine className="size-5" /> จัดการแบบฝึกหัด</button>
-            <button onClick={() => setActiveTab("users")} className={`flex items-center gap-3 rounded-2xl p-3 font-bold transition-all ${activeTab === "users" ? "bg-primary/10 text-primary shadow-sm" : "text-slate-500 hover:bg-slate-100"}`}><Users className="size-5" /> จัดการผู้ใช้งาน</button>
+            <button onClick={() => setActiveTab("users")} className={`flex items-center gap-3 rounded-2xl p-3 font-bold transition-all ${activeTab === "users" ? "bg-primary/10 text-primary shadow-sm" : "text-slate-500 hover:bg-slate-100"}`}><Users className="size-5" /> จัดการผู้ใช้งาน & สิทธิ์</button>
             <button onClick={() => setActiveTab("codes")} className={`flex items-center gap-3 rounded-2xl p-3 font-bold transition-all ${activeTab === "codes" ? "bg-primary/10 text-primary shadow-sm" : "text-slate-500 hover:bg-slate-100"}`}><Key className="size-5" /> รหัสปลดล็อกสิทธิ์</button>
+            <button onClick={() => setActiveTab("reports")} className={`flex items-center gap-3 rounded-2xl p-3 font-bold transition-all ${activeTab === "reports" ? "bg-primary/10 text-primary shadow-sm" : "text-slate-500 hover:bg-slate-100"}`}><FileSpreadsheet className="size-5" /> สรุปผลสอบ (Submissions)</button>
           </nav>
         </div>
         
@@ -887,18 +1146,22 @@ function AdminDashboard() {
         <div className="mb-8 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <h1 className="text-3xl font-black text-slate-800 tracking-tight">
             {activeTab === "dashboard" && "Dashboard (ภาพรวมระบบ)"}
-            {activeTab === "lessons" && "จัดการเนื้อหาบทเรียน"}
+            {activeTab === "analytics" && "วิเคราะห์จุดอ่อนข้อสอบ & คำถามที่เด็กตอบผิดบ่อย"}
             {activeTab === "exams" && "จัดการชุดข้อสอบ"}
+            {activeTab === "trash_exams" && "ถังขยะข้อสอบ (กู้คืน / ลบถาวร)"}
+            {activeTab === "bulk_exam" && "นำเข้าชุดข้อสอบ (Bulk JSON Import)"}
+            {activeTab === "lessons" && "จัดการเนื้อหาบทเรียน"}
             {activeTab === "worksheets" && "จัดการแบบฝึกหัด"}
-            {activeTab === "users" && "จัดการผู้ใช้งาน"}
+            {activeTab === "users" && "จัดการผู้ใช้งาน & สิทธิ์การเข้าถึง"}
             {activeTab === "codes" && "จัดการรหัสปลดล็อกสิทธิ์ (Access Codes)"}
+            {activeTab === "reports" && "รายงานผลการสอบล่าสุด (Exam Submissions)"}
           </h1>
 
           {activeTab === "exams" && (
             <button 
               onClick={() => { 
                 setEditingExamId(null);
-                setNewExamInfo({ title: "", grade: [filterGrade === "ทั้งหมด" ? "ป.6" : filterGrade], program: [filterProgram === "ทั้งหมด" ? "ISM" : filterProgram], subject: filterSubject === "ทั้งหมด" ? "คณิตศาสตร์" : filterSubject, year: "2566", is_timed: true, duration_minutes: 90, shuffle_questions: false });
+                setNewExamInfo({ title: "", grade: [filterGrade === "ทั้งหมด" ? "ป.6" : filterGrade], program: [filterProgram === "ทั้งหมด" ? "ISM" : filterProgram], subject: filterSubject === "ทั้งหมด" ? "คณิตศาสตร์" : filterSubject, year: "2567", is_timed: true, duration_minutes: 90, shuffle_questions: false });
                 setExamModalMode("exam_info"); 
                 setPreviewImages([]); 
                 setManualQuestions([{ id: 1, type: "choice", question: "", image_url: "", options: ["", "", "", ""], correct_index: 0, subjective_answers: [""], explanation: "" }]);
@@ -939,6 +1202,45 @@ function AdminDashboard() {
               <div className="rounded-3xl border bg-white p-6 shadow-sm"><p className="text-xs font-bold text-slate-400 uppercase">จำนวนข้อสอบ</p><p className="mt-2 text-3xl font-black text-slate-800">{exams.length} <span className="text-sm font-semibold text-slate-400">ชุด</span></p></div>
               <div className="rounded-3xl border bg-white p-6 shadow-sm"><p className="text-xs font-bold text-slate-400 uppercase">จำนวนบทเรียน</p><p className="mt-2 text-3xl font-black text-slate-800">{lessons.length} <span className="text-sm font-semibold text-slate-400">บทเรียน</span></p></div>
               <div className="rounded-3xl border bg-white p-6 shadow-sm"><p className="text-xs font-bold text-slate-400 uppercase">แบบฝึกหัด</p><p className="mt-2 text-3xl font-black text-slate-800">{worksheets.length} <span className="text-sm font-semibold text-slate-400">ชุด</span></p></div>
+            </div>
+          </div>
+        )}
+
+        {/* Tab: Analytics จุดอ่อนข้อสอบ */}
+        {activeTab === "analytics" && (
+          <div className="animate-in fade-in duration-300 space-y-6">
+            <div className="bg-gradient-to-br from-rose-50 to-pink-50 p-6 rounded-3xl border border-rose-100 flex items-center justify-between">
+              <div>
+                <span className="text-xs font-black uppercase text-rose-600 tracking-wider">Mistake Inspector</span>
+                <h2 className="text-xl font-black text-slate-900 mt-1">10 ข้อสอบที่มีนักเรียนตอบผิดมากที่สุดในระบบ</h2>
+                <p className="text-xs text-slate-500 mt-1">ใช้สำหรับนำข้อเหล่านี้ไปเปิดติวเน้นย้ำในห้องเรียนสด หรือสร้างชุดข้อสอบแก้จุดบกพร่อง</p>
+              </div>
+              <TrendingDown className="size-12 text-rose-500 opacity-80" />
+            </div>
+
+            <div className="bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden">
+              <div className="p-6 divide-y divide-slate-100">
+                {hardestQuestionsStats.length > 0 ? (
+                  hardestQuestionsStats.map((item, idx) => (
+                    <div key={idx} className="py-4 first:pt-0 last:pb-0 flex items-start justify-between gap-4">
+                      <div className="space-y-1.5 flex-1">
+                        <div className="flex items-center gap-2">
+                          <span className="px-2.5 py-0.5 rounded-lg bg-slate-900 text-white font-black text-xs">อันดับ {idx + 1}</span>
+                          <span className="text-xs font-bold text-primary bg-primary/10 px-2 py-0.5 rounded-md">{item.subject}</span>
+                          <span className="text-xs text-slate-400 font-semibold">{item.examTitle}</span>
+                        </div>
+                        <p className="font-bold text-slate-800 text-base leading-relaxed">{item.question}</p>
+                      </div>
+                      <div className="text-right shrink-0 bg-rose-50 border border-rose-200 px-4 py-2 rounded-2xl">
+                        <p className="text-[10px] font-bold uppercase text-rose-500">ตอบผิดสะสม</p>
+                        <p className="text-xl font-black text-rose-700">{item.count} <span className="text-xs font-medium text-slate-500">ครั้ง</span></p>
+                      </div>
+                    </div>
+                  ))
+                ) : (
+                  <div className="py-16 text-center text-slate-400">ยังไม่มีสถิติข้อที่ทำผิดสะสม</div>
+                )}
+              </div>
             </div>
           </div>
         )}
@@ -1006,7 +1308,7 @@ function AdminDashboard() {
                                 }); 
                                 setShowLessonModal(true); 
                               }} className="p-2 text-slate-400 hover:text-primary transition-colors border rounded-xl bg-white shadow-sm" title="แก้ไขบทเรียน"><Edit className="size-4"/></button>
-                              <button onClick={() => handleDeleteLesson(lesson.id)} className="p-2 text-slate-400 hover:text-red-500 transition-colors border rounded-xl bg-white shadow-sm" title="ลบบบทเรียน"><Trash2 className="size-4"/></button>
+                              <button onClick={() => handleDeleteLesson(lesson.id)} className="p-2 text-slate-400 hover:text-red-500 transition-colors border rounded-xl bg-white shadow-sm" title="ลบบทเรียน"><Trash2 className="size-4"/></button>
                             </div>
                           </td>
                         </tr>
@@ -1077,7 +1379,7 @@ function AdminDashboard() {
                           <td className="p-4 text-slate-600 text-center">
                             {exam.shuffle_questions ? <span className="text-[10px] bg-teal-50 text-teal-700 font-bold px-2 py-0.5 rounded border border-teal-200">เปิดสลับ</span> : "-"}
                           </td>
-                          <td className="p-4 text-slate-600 text-center font-medium bg-slate-50/50">{exam.total_questions}</td>
+                          <td className="p-4 text-slate-600 text-center font-medium bg-slate-50/50">{exam.total_questions || exam.questions?.length || 0}</td>
                           <td className="p-4"><span className={`inline-flex px-2.5 py-1 rounded-full text-xs font-semibold border ${exam.status === 'published' ? 'bg-green-50 text-green-700 border-green-200' : 'bg-slate-100 text-slate-600 border-slate-200'}`}>{exam.status === 'published' ? 'พร้อมใช้งาน' : 'ฉบับร่าง'}</span></td>
                           <td className="p-4">
                             <div className="flex flex-wrap gap-1.5">
@@ -1085,7 +1387,7 @@ function AdminDashboard() {
                               <button onClick={() => handleExportWord(exam, true)} className="p-2 text-slate-400 hover:text-emerald-600 transition-colors border rounded-xl bg-white shadow-sm" title="Export Word (ฉบับครู พร้อมเฉลย)"><Download className="size-4"/></button>
                               <button onClick={() => handleDuplicateExam(exam)} className="p-2 text-slate-400 hover:text-indigo-600 transition-colors border rounded-xl bg-white shadow-sm" title="คัดลอกชุดข้อสอบนี้"><Copy className="size-4"/></button>
                               <button onClick={() => handleOpenEditExam(exam)} className="p-2 text-slate-400 hover:text-primary transition-colors border rounded-xl bg-white shadow-sm" title="แก้ไขข้อสอบ"><Edit className="size-4"/></button>
-                              <button onClick={() => handleDeleteExam(exam.id)} className="p-2 text-slate-400 hover:text-red-500 transition-colors border rounded-xl bg-white shadow-sm" title="ลบข้อสอบ"><Trash2 className="size-4"/></button>
+                              <button onClick={() => handleSoftDeleteExam(exam.id)} className="p-2 text-slate-400 hover:text-amber-600 border rounded-xl bg-white shadow-sm" title="ย้ายเข้าถังขยะ"><Trash2 className="size-4"/></button>
                             </div>
                           </td>
                         </tr>
@@ -1096,6 +1398,203 @@ function AdminDashboard() {
                   </tbody>
                 </table>
               </div>
+            </div>
+          </div>
+        )}
+
+        {/* Tab: ถังขยะข้อสอบ (Restore / Permanent Delete) */}
+        {activeTab === "trash_exams" && (
+          <div className="animate-in fade-in duration-300 space-y-6">
+            <div className="rounded-3xl border bg-white shadow-sm overflow-hidden">
+              <div className="border-b bg-amber-50/50 p-4 flex justify-between items-center">
+                <h3 className="font-bold text-lg text-amber-900">ถังขยะข้อสอบ ({trashExams.length} ชุด)</h3>
+                <span className="text-xs text-amber-700 font-bold">สามารถกดกู้คืน หรือลบถาวรได้</span>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-sm">
+                  <thead className="border-b text-slate-500 bg-white">
+                    <tr><th className="p-4 font-medium">ชื่อชุดข้อสอบ</th><th className="p-4 font-medium">วิชา</th><th className="p-4 font-medium">ปี</th><th className="p-4 font-medium text-right pr-6">การจัดการ</th></tr>
+                  </thead>
+                  <tbody className="divide-y">
+                    {trashExams.length > 0 ? (
+                      trashExams.map(exam => (
+                        <tr key={exam.id} className="hover:bg-slate-50 transition-colors">
+                          <td className="p-4 font-bold text-slate-800">{exam.title}</td>
+                          <td className="p-4 text-slate-600">{exam.subject}</td>
+                          <td className="p-4 text-slate-600">{exam.year}</td>
+                          <td className="p-4 text-right pr-6">
+                            <div className="flex justify-end gap-2">
+                              <button onClick={() => handleRestoreExam(exam.id)} className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition flex items-center gap-1 shadow-sm">
+                                <RotateCcw className="size-3.5"/> กู้คืนข้อสอบ
+                              </button>
+                              <button onClick={() => handlePermanentDeleteExam(exam.id)} className="px-3.5 py-1.5 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-bold transition flex items-center gap-1 shadow-sm">
+                                <Trash2 className="size-3.5"/> ลบถาวร
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))
+                    ) : (
+                      <tr><td colSpan={4} className="p-12 text-center text-slate-400">ไม่มีข้อสอบในถังขยะ</td></tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Tab: Bulk Exam JSON Import */}
+        {activeTab === "bulk_exam" && (
+          <div className="bg-white rounded-3xl border border-slate-200 p-6 sm:p-8 shadow-sm animate-in fade-in duration-300">
+            <div className="grid grid-cols-1 md:grid-cols-12 gap-8">
+              
+              {/* รายละเอียดชุดข้อสอบ */}
+              <div className="md:col-span-4 space-y-4">
+                <h3 className="font-bold text-base text-slate-800 border-b pb-3">1. กำหนดรายละเอียดชุดข้อสอบ</h3>
+                
+                <div>
+                  <label className="text-xs font-bold text-slate-500 mb-1 block">ชื่อชุดข้อสอบ</label>
+                  <input
+                    type="text"
+                    placeholder="เช่น ข้อสอบแข่งขันวิทยาศาสตร์ ป.6"
+                    value={bulkExamForm.title}
+                    onChange={(e) => setBulkExamForm(prev => ({ ...prev, title: e.target.value }))}
+                    className="w-full p-3 rounded-xl border border-slate-200 text-sm font-bold outline-none focus:border-primary"
+                  />
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-xs font-bold text-slate-500 mb-1 block">วิชา</label>
+                    <select
+                      value={bulkExamForm.subject}
+                      onChange={(e) => setBulkExamForm(prev => ({ ...prev, subject: e.target.value }))}
+                      className="w-full p-3 rounded-xl border border-slate-200 text-sm font-semibold outline-none focus:border-primary bg-white"
+                    >
+                      <option value="คณิตศาสตร์">คณิตศาสตร์</option>
+                      <option value="วิทยาศาสตร์">วิทยาศาสตร์</option>
+                      <option value="ภาษาอังกฤษ">ภาษาอังกฤษ</option>
+                      <option value="ภาษาไทย">ภาษาไทย</option>
+                      <option value="สังคมศึกษา">สังคมศึกษา</option>
+                      <option value="ความถนัดทางคณิตศาสตร์">ความถนัดทางคณิตศาสตร์</option>
+                      <option value="ทักษะภาษาอังกฤษ">ทักษะภาษาอังกฤษ</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="text-xs font-bold text-slate-500 mb-1 block">ปีการศึกษา</label>
+                    <input
+                      type="text"
+                      value={bulkExamForm.year}
+                      onChange={(e) => setBulkExamForm(prev => ({ ...prev, year: e.target.value }))}
+                      className="w-full p-3 rounded-xl border border-slate-200 text-sm font-semibold outline-none"
+                    />
+                  </div>
+                </div>
+
+                <div className="space-y-3 bg-slate-50 p-4 rounded-2xl border border-slate-100">
+                  <div>
+                    <label className="block text-xs font-bold text-slate-500 uppercase tracking-wide mb-2">ระดับชั้น</label>
+                    <div className="flex flex-wrap gap-2">
+                      {["ป.4", "ป.5", "ป.6"].map(g => (
+                        <button 
+                          key={g} 
+                          type="button" 
+                          onClick={() => setBulkExamForm(prev => ({
+                            ...prev, 
+                            grade: prev.grade.includes(g) ? prev.grade.filter(x => x !== g) : [...prev.grade, g]
+                          }))} 
+                          className={`px-3 py-1.5 border rounded-xl text-xs font-bold transition-all ${bulkExamForm.grade.includes(g) ? 'bg-primary text-white border-primary shadow-sm' : 'bg-white text-slate-500 border-slate-200'}`}
+                        >
+                          {g}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold text-slate-500 uppercase tracking-wide mb-2">แผนการเรียน</label>
+                    <div className="flex flex-wrap gap-2">
+                      {["ISM", "EP", "ภาคปกติ"].map(p => (
+                        <button 
+                          key={p} 
+                          type="button" 
+                          onClick={() => setBulkExamForm(prev => ({
+                            ...prev, 
+                            program: prev.program.includes(p) ? prev.program.filter(x => x !== p) : [...prev.program, p]
+                          }))} 
+                          className={`px-3 py-1.5 border rounded-xl text-xs font-bold transition-all ${bulkExamForm.program.includes(p) ? 'bg-primary text-white border-primary shadow-sm' : 'bg-white text-slate-500 border-slate-200'}`}
+                        >
+                          {p}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3 items-center">
+                  <div>
+                    <label className="text-xs font-bold text-slate-500 mb-1 block">เวลาสอบ (นาที)</label>
+                    <input
+                      type="number"
+                      value={bulkExamForm.duration_minutes}
+                      onChange={(e) => setBulkExamForm(prev => ({ ...prev, duration_minutes: Number(e.target.value) }))}
+                      className="w-full p-3 rounded-xl border border-slate-200 text-sm font-semibold outline-none"
+                    />
+                  </div>
+                  <div className="pt-4">
+                    <label className="text-xs font-bold text-slate-700 flex items-center gap-2 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={bulkExamForm.shuffle_questions}
+                        onChange={(e) => setBulkExamForm(prev => ({ ...prev, shuffle_questions: e.target.checked }))}
+                        className="size-4 text-primary rounded"
+                      />
+                      <span>เปิดระบบสลับช้อยส์</span>
+                    </label>
+                  </div>
+                </div>
+              </div>
+
+              {/* JSON Input Area */}
+              <div className="md:col-span-8 space-y-4">
+                <div className="flex items-center justify-between border-b pb-3">
+                  <h3 className="font-bold text-base text-slate-800">2. วางโครงสร้าง JSON ของคำถาม</h3>
+                  <button
+                    type="button"
+                    onClick={loadSampleJson}
+                    className="text-xs text-primary font-bold hover:underline inline-flex items-center gap-1"
+                  >
+                    <Sparkles className="size-3.5" /> โหลดตัวอย่าง JSON (Template)
+                  </button>
+                </div>
+
+                <textarea
+                  rows={13}
+                  value={rawQuestionsJson}
+                  onChange={(e) => setRawQuestionsJson(e.target.value)}
+                  placeholder={`[\n  {\n    "type": "choice",\n    "question": "คำถาม...",\n    "options": ["ก", "ข", "ค", "ง"],\n    "correct_index": 0,\n    "explanation": "คำอธิบาย..."\n  }\n]`}
+                  className="w-full p-4 rounded-2xl border border-slate-200 font-mono text-xs bg-slate-50/50 outline-none focus:bg-white focus:border-primary custom-scrollbar leading-relaxed"
+                />
+
+                {bulkImportStatus && (
+                  <div className="p-4 rounded-xl bg-slate-100 border text-xs font-bold text-slate-700">
+                    {bulkImportStatus}
+                  </div>
+                )}
+
+                <button
+                  type="button"
+                  onClick={handleBulkImportExam}
+                  disabled={isBulkImporting || !rawQuestionsJson.trim()}
+                  className="w-full py-4 rounded-2xl bg-primary hover:bg-primary/90 text-white font-bold text-sm shadow-md transition-all active:scale-[0.99] disabled:opacity-50 flex items-center justify-center gap-2"
+                >
+                  {isBulkImporting ? <Loader2 className="size-4 animate-spin" /> : <UploadCloud className="size-4" />}
+                  นำเข้าข้อสอบชุดนี้ทันที
+                </button>
+              </div>
+
             </div>
           </div>
         )}
@@ -1170,11 +1669,10 @@ function AdminDashboard() {
           </div>
         )}
 
-        {/* Tab 5: Users */}
+        {/* Tab 5: Users & Permissions */}
         {activeTab === "users" && (
-          <div className="animate-in fade-in slide-in-from-bottom-2 duration-300">
-            {/* Top Bulk Action Bar for Users */}
-            <div className="bg-white p-4 rounded-3xl border shadow-sm mb-6 flex flex-wrap items-center justify-between gap-3">
+          <div className="animate-in fade-in slide-in-from-bottom-2 duration-300 space-y-6">
+            <div className="bg-white p-4 rounded-3xl border shadow-sm flex flex-wrap items-center justify-between gap-3">
               <div className="flex items-center gap-2">
                 <Users className="size-5 text-primary" />
                 <span className="font-bold text-slate-800 text-sm">การจัดการนักเรียนทั้งหมด ({students.length} คน)</span>
@@ -1197,21 +1695,122 @@ function AdminDashboard() {
               </div>
             </div>
 
-            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-              <div className="lg:col-span-4 rounded-3xl border bg-white shadow-sm p-5 flex flex-col h-[75vh]">
-                <div className="flex justify-between items-center mb-5">
-                  <h3 className="font-bold text-lg text-slate-800">รายชื่อนักเรียน</h3>
-                  <button onClick={handleOpenAddStudent} className="flex items-center gap-1.5 text-xs bg-primary text-white px-3.5 py-2 rounded-2xl font-bold hover:bg-primary/90 transition shadow-sm"><PlusCircle className="size-4" /> เพิ่มนักเรียน</button>
+            {/* Quick Permissions Checkbox Table */}
+            <div className="bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden">
+              <div className="p-5 border-b border-slate-100 flex flex-col sm:flex-row items-center justify-between gap-4 bg-slate-50/50">
+                <div className="relative w-full sm:w-80">
+                  <Search className="size-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="text"
+                    placeholder="ค้นหาชื่อ หรือ อีเมลนักเรียน..."
+                    value={searchStudent}
+                    onChange={(e) => setSearchStudent(e.target.value)}
+                    className="w-full pl-10 pr-4 py-2 rounded-xl border border-slate-200 text-sm font-medium outline-none focus:border-primary focus:ring-2 focus:ring-primary/10 bg-white"
+                  />
                 </div>
+                <div className="flex items-center gap-3">
+                  <button onClick={handleOpenAddStudent} className="flex items-center gap-1.5 text-xs bg-primary text-white px-3.5 py-2 rounded-2xl font-bold hover:bg-primary/90 transition shadow-sm">
+                    <PlusCircle className="size-4" /> สร้างบัญชีใหม่
+                  </button>
+                </div>
+              </div>
+
+              <div className="overflow-x-auto">
+                <table className="w-full text-left border-collapse">
+                  <thead>
+                    <tr className="bg-slate-50 border-b border-slate-100 text-[11px] font-bold text-slate-500 uppercase tracking-wider">
+                      <th className="p-4 pl-6">นักเรียน</th>
+                      <th className="p-4 text-center">สถานะ</th>
+                      <th className="p-4 text-center">ป.4</th>
+                      <th className="p-4 text-center">ป.5</th>
+                      <th className="p-4 text-center">ป.6</th>
+                      <th className="p-4 text-center">ISM</th>
+                      <th className="p-4 text-center">EP</th>
+                      <th className="p-4 text-center">ภาคปกติ</th>
+                      <th className="p-4 text-right pr-6">การจัดการ</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 text-sm">
+                    {filteredStudents.map((s) => {
+                      const perms = s.permissions || {};
+                      const isSaving = savingStudentId === s.id;
+
+                      return (
+                        <tr key={s.id} className="hover:bg-slate-50/60 transition-colors">
+                          <td className="p-4 pl-6">
+                            <p className="font-bold text-slate-800">{s.name || "ไม่ระบุชื่อ"}</p>
+                            <p className="text-xs text-slate-400">{s.email}</p>
+                          </td>
+                          <td className="p-4 text-center">
+                            <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${s.is_active !== false ? "bg-emerald-50 text-emerald-700" : "bg-rose-50 text-rose-700"}`}>
+                              {s.is_active !== false ? "ปกติ" : "ระงับ"}
+                            </span>
+                          </td>
+
+                          {["ป.4", "ป.5", "ป.6", "ISM", "EP", "ภาคปกติ"].map((key) => (
+                            <td key={key} className="p-4 text-center">
+                              <button
+                                type="button"
+                                onClick={() => handleQuickToggleStudentPermission(s.id, key)}
+                                className={`size-7 rounded-lg border flex items-center justify-center transition-all mx-auto ${
+                                  perms[key]
+                                    ? "bg-emerald-500 border-emerald-600 text-white shadow-sm"
+                                    : "bg-slate-100 border-slate-200 text-slate-300 hover:border-slate-300"
+                                }`}
+                              >
+                                {perms[key] ? <CheckCircle2 className="size-4" /> : <X className="size-3" />}
+                              </button>
+                            </td>
+                          ))}
+
+                          <td className="p-4 text-right pr-6">
+                            <div className="flex justify-end gap-1.5">
+                              <button
+                                onClick={() => handleQuickSaveStudentPermission(s)}
+                                disabled={isSaving}
+                                className="px-3 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs shadow-sm transition-all disabled:opacity-50 inline-flex items-center gap-1"
+                                title="บันทึกสิทธิ์"
+                              >
+                                {isSaving ? <Loader2 className="size-3.5 animate-spin" /> : <Save className="size-3.5" />}
+                                บันทึก
+                              </button>
+                              <button
+                                onClick={() => handleForceResetPassword(s)}
+                                className="p-1.5 bg-amber-50 text-amber-700 border border-amber-200 rounded-xl text-xs hover:bg-amber-100"
+                                title="Reset รหัสผ่านเป็น 12345678"
+                              >
+                                <Key className="size-3.5"/>
+                              </button>
+                              <button
+                                onClick={() => handleToggleStudentActive(s)}
+                                className={`p-1.5 rounded-xl border text-xs ${s.is_active !== false ? "text-rose-600 bg-rose-50 border-rose-200 hover:bg-rose-100" : "text-emerald-600 bg-emerald-50 border-emerald-200 hover:bg-emerald-100"}`}
+                                title={s.is_active !== false ? "ระงับบัญชี" : "ปลดระงับ"}
+                              >
+                                <ShieldAlert className="size-3.5"/>
+                              </button>
+                              <button onClick={() => handleOpenEditStudent(s)} className="p-1.5 text-slate-400 hover:text-primary border rounded-xl bg-white shadow-sm" title="แก้ไขโปรไฟล์"><Edit className="size-3.5"/></button>
+                              <button onClick={() => handleDeleteStudent(s.id)} className="p-1.5 text-slate-400 hover:text-red-500 border rounded-xl bg-white shadow-sm" title="ลบบัญชี"><Trash2 className="size-3.5"/></button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            {/* Individual Student Dashboard View */}
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+              <div className="lg:col-span-4 rounded-3xl border bg-white shadow-sm p-5 flex flex-col h-[60vh]">
+                <h3 className="font-bold text-base text-slate-800 mb-3">เลือกลูกศิษย์เพื่อดูคะแนนละเอียด</h3>
                 <div className="space-y-2 overflow-y-auto pr-1 flex-1 custom-scrollbar">
                   {students.map((student) => (
                     <div key={student.id} onClick={() => setSelectedStudent(student)} className={`flex items-center gap-3 p-3.5 border rounded-2xl cursor-pointer transition-all ${selectedStudent?.id === student.id ? 'border-primary bg-primary/5 ring-2 ring-primary/20' : 'hover:bg-slate-50 border-slate-200'}`}>
                       <div className={`p-2.5 rounded-2xl ${selectedStudent?.id === student.id ? 'bg-primary/20 text-primary' : 'bg-slate-100 text-slate-500'}`}><Users className="size-5"/></div>
                       <div>
                         <p className={`font-bold text-sm ${selectedStudent?.id === student.id ? 'text-primary' : 'text-slate-800'}`}>{student.name}</p>
-                        <p className="text-xs text-slate-500 mt-0.5">
-                          {getActivePermissionsText(student.permissions, ["ป.4", "ป.5", "ป.6"])} / {getActivePermissionsText(student.permissions, ["ISM", "EP", "ภาคปกติ"])}
-                        </p>
+                        <p className="text-xs text-slate-500 mt-0.5">{student.email}</p>
                       </div>
                     </div>
                   ))}
@@ -1221,7 +1820,7 @@ function AdminDashboard() {
               {selectedStudent ? (
                 <div className="lg:col-span-8 rounded-3xl border bg-white shadow-sm p-6 space-y-6">
                   <div className="flex justify-between items-start">
-                    <h3 className="font-black text-lg text-slate-800 flex items-center gap-2"><BarChart3 className="size-5 text-primary"/> ข้อมูลและผลการเรียน</h3>
+                    <h3 className="font-black text-lg text-slate-800 flex items-center gap-2"><BarChart3 className="size-5 text-primary"/> ผลการเรียนรายบุคคล</h3>
                     <div className="flex gap-2">
                       <button onClick={() => handleResetStudentData(selectedStudent)} className="p-2 text-slate-500 hover:text-amber-600 bg-slate-50 hover:bg-amber-50 rounded-2xl transition-colors border shadow-sm" title="รีเซ็ตผลสอบคนนี้"><RefreshCw className="size-4"/></button>
                       <button onClick={() => handleOpenEditStudent(selectedStudent)} className="p-2 text-slate-500 hover:text-primary bg-slate-50 hover:bg-primary/10 rounded-2xl transition-colors border shadow-sm" title="แก้ไขข้อมูลและสิทธิ์"><Edit className="size-4"/></button>
@@ -1230,32 +1829,13 @@ function AdminDashboard() {
                   </div>
 
                   <div className="bg-slate-50 p-6 rounded-3xl border border-slate-200/80 space-y-4">
-                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                      <div>
-                        <p className="text-2xl font-black text-slate-800">{selectedStudent.name}</p>
-                        <p className="text-xs sm:text-sm text-slate-500 mt-0.5">{selectedStudent.email} • {selectedStudent.phone || "ไม่ระบุเบอร์โทร"}</p>
-                      </div>
-                      <button onClick={() => handleOpenEditStudent(selectedStudent)} className="text-xs font-bold text-primary bg-white border border-primary/30 px-3.5 py-1.5 rounded-2xl hover:bg-primary/5 transition self-start sm:self-auto">
-                        แก้ไขสิทธิ์
-                      </button>
-                    </div>
-
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-3 border-t border-slate-200">
-                      <div className="bg-white p-3.5 rounded-2xl border border-slate-200 space-y-1.5">
-                        <span className="text-xs font-semibold text-slate-500 flex items-center gap-1.5"><ShieldCheck className="size-3.5 text-primary" /> สิทธิ์ระดับชั้น:</span>
-                        <p className="text-sm font-bold text-slate-800">{getActivePermissionsText(selectedStudent.permissions, ["ป.4", "ป.5", "ป.6"])}</p>
-                      </div>
-                      <div className="bg-white p-3.5 rounded-2xl border border-slate-200 space-y-1.5">
-                        <span className="text-xs font-semibold text-slate-500 flex items-center gap-1.5"><ShieldCheck className="size-3.5 text-primary" /> สิทธิ์แผนการเรียน:</span>
-                        <p className="text-sm font-bold text-slate-800">{getActivePermissionsText(selectedStudent.permissions, ["ISM", "EP", "ภาคปกติ"])}</p>
-                      </div>
-                    </div>
+                    <p className="text-2xl font-black text-slate-800">{selectedStudent.name}</p>
+                    <p className="text-xs sm:text-sm text-slate-500">{selectedStudent.email} • {selectedStudent.phone || "ไม่ระบุเบอร์โทร"}</p>
                   </div>
 
-                  {/* Exam History Details */}
-                  <div className="bg-slate-50 p-6 rounded-3xl border border-slate-200/80 space-y-4 mt-6">
+                  <div className="bg-slate-50 p-6 rounded-3xl border border-slate-200/80 space-y-4">
                     <div className="flex items-center justify-between">
-                      <h4 className="font-bold text-slate-800 flex items-center gap-2"><History className="size-4 text-slate-500"/> ประวัติการทำข้อสอบล่าสุด</h4>
+                      <h4 className="font-bold text-slate-800 flex items-center gap-2"><History className="size-4 text-slate-500"/> ประวัติการทำข้อสอบ</h4>
                       <span className="text-xs font-semibold bg-white border px-2.5 py-1 rounded-xl text-slate-500">{selectedStudent.examHistory?.length || 0} รายการ</span>
                     </div>
 
@@ -1290,16 +1870,12 @@ function AdminDashboard() {
                     )}
                   </div>
                 </div>
-              ) : (
-                <div className="lg:col-span-8 rounded-3xl border bg-slate-50 border-dashed border-slate-200 shadow-sm p-6 h-[400px] flex items-center justify-center text-slate-400 text-sm">
-                  คลิกที่รายชื่อนักเรียนเพื่อดูรายละเอียดและผลสอบ
-                </div>
-              )}
+              ) : null}
             </div>
           </div>
         )}
 
-        {/* Tab 6: Access Codes Management */}
+        {/* Tab 6: Access Codes */}
         {activeTab === "codes" && (
           <div className="animate-in fade-in slide-in-from-bottom-2 duration-300 space-y-6">
             <div className="bg-white p-6 rounded-3xl border shadow-sm space-y-4">
@@ -1361,6 +1937,55 @@ function AdminDashboard() {
             </div>
           </div>
         )}
+
+        {/* Tab 7: Reports (Submissions) */}
+        {activeTab === "reports" && (
+          <div className="bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden animate-in fade-in duration-300">
+            <div className="p-6 border-b border-slate-100 flex items-center justify-between">
+              <h3 className="font-bold text-base text-slate-800">รายการส่งข้อสอบ 200 รายการล่าสุด</h3>
+              <button
+                onClick={handleExportSubmissionsCSV}
+                className="text-xs text-emerald-700 font-bold bg-emerald-50 px-4 py-2 rounded-xl border border-emerald-200 flex items-center gap-1.5 hover:bg-emerald-100 transition shadow-sm"
+              >
+                <Download className="size-4" /> ดาวน์โหลดทั้งหมดเป็น CSV (Excel)
+              </button>
+            </div>
+
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse">
+                <thead>
+                  <tr className="bg-slate-50/80 border-b border-slate-100 text-[11px] font-bold text-slate-500 uppercase tracking-wider">
+                    <th className="p-4 pl-6">นักเรียน</th>
+                    <th className="p-4">วิชา / แผนการเรียน</th>
+                    <th className="p-4 text-center">คะแนน</th>
+                    <th className="p-4 text-center">คิดเป็น</th>
+                    <th className="p-4 text-right pr-6">วันที่สอบ</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 text-sm">
+                  {submissions.map((sub) => (
+                    <tr key={sub.id} className="hover:bg-slate-50/60 transition-colors">
+                      <td className="p-4 pl-6 font-bold text-slate-800">{sub.student_name}</td>
+                      <td className="p-4">
+                        <span className="font-semibold text-slate-700">{sub.subject}</span>
+                        <span className="text-xs text-slate-400 block">{sub.program} ({sub.year})</span>
+                      </td>
+                      <td className="p-4 text-center font-bold text-slate-700">{sub.score} / {sub.total}</td>
+                      <td className="p-4 text-center">
+                        <span className="px-2.5 py-1 rounded-lg text-xs font-black bg-primary/10 text-primary">
+                          {sub.percentage}%
+                        </span>
+                      </td>
+                      <td className="p-4 text-right pr-6 text-xs text-slate-400">
+                        {new Date(sub.created_at).toLocaleString("th-TH")}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
       </main>
 
       {/* Modal: Add/Edit Lesson */}
@@ -1379,7 +2004,7 @@ function AdminDashboard() {
               
               <div className="space-y-4 bg-slate-50 p-4 rounded-2xl border border-slate-100">
                 <div>
-                  <label className="block text-xs font-bold text-slate-500 uppercase tracking-wide mb-2">ระดับชั้น (เลือกได้หลายชั้น)</label>
+                  <label className="block text-xs font-bold text-slate-500 uppercase tracking-wide mb-2">ระดับชั้น</label>
                   <div className="flex flex-wrap gap-2">
                     {["ป.4", "ป.5", "ป.6"].map(g => (
                       <button 
@@ -1398,7 +2023,7 @@ function AdminDashboard() {
                 </div>
 
                 <div>
-                  <label className="block text-xs font-bold text-slate-500 uppercase tracking-wide mb-2">แผนการเรียน (เลือกได้หลายแผน)</label>
+                  <label className="block text-xs font-bold text-slate-500 uppercase tracking-wide mb-2">แผนการเรียน</label>
                   <div className="flex flex-wrap gap-2">
                     {["ISM", "EP", "ภาคปกติ"].map(p => (
                       <button 
@@ -1410,7 +2035,7 @@ function AdminDashboard() {
                         }))} 
                         className={`px-3.5 py-1.5 border rounded-xl text-xs font-bold transition-all ${lessonFormData.program.includes(p) ? 'bg-primary text-white border-primary shadow-sm' : 'bg-white text-slate-500 hover:bg-slate-100 border-slate-200'}`}
                       >
-                        {p === "ภาคปกติ" ? "ภาคปกติ (Regular)" : `แผน ${p}`}
+                        {p}
                       </button>
                     ))}
                   </div>
@@ -1449,7 +2074,7 @@ function AdminDashboard() {
               
               <div className="space-y-4 bg-slate-50 p-4 rounded-2xl border border-slate-100">
                 <div>
-                  <label className="block text-xs font-bold text-slate-500 uppercase tracking-wide mb-2">ระดับชั้น (เลือกได้หลายชั้น)</label>
+                  <label className="block text-xs font-bold text-slate-500 uppercase tracking-wide mb-2">ระดับชั้น</label>
                   <div className="flex flex-wrap gap-2">
                     {["ป.4", "ป.5", "ป.6"].map(g => (
                       <button 
@@ -1468,7 +2093,7 @@ function AdminDashboard() {
                 </div>
 
                 <div>
-                  <label className="block text-xs font-bold text-slate-500 uppercase tracking-wide mb-2">แผนการเรียน (เลือกได้หลายแผน)</label>
+                  <label className="block text-xs font-bold text-slate-500 uppercase tracking-wide mb-2">แผนการเรียน</label>
                   <div className="flex flex-wrap gap-2">
                     {["ISM", "EP", "ภาคปกติ"].map(p => (
                       <button 
@@ -1480,7 +2105,7 @@ function AdminDashboard() {
                         }))} 
                         className={`px-3.5 py-1.5 border rounded-xl text-xs font-bold transition-all ${worksheetFormData.program.includes(p) ? 'bg-primary text-white border-primary shadow-sm' : 'bg-white text-slate-500 hover:bg-slate-100 border-slate-200'}`}
                       >
-                        {p === "ภาคปกติ" ? "ภาคปกติ (Regular)" : `แผน ${p}`}
+                        {p}
                       </button>
                     ))}
                   </div>
@@ -1495,7 +2120,7 @@ function AdminDashboard() {
               </div>
 
               <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100 relative">
-                <label className="block text-sm font-bold text-slate-700 mb-2">อัปโหลดรูปภาพแบบฝึกหัด (เลือกได้หลายหน้าพร้อมกัน)</label>
+                <label className="block text-sm font-bold text-slate-700 mb-2">อัปโหลดรูปภาพแบบฝึกหัด (เลือกได้หลายหน้า)</label>
                 <input type="file" accept="image/*" multiple onChange={handleUploadWorksheetImages} disabled={isUploading} className="w-full text-sm file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-xs file:font-bold file:bg-primary/10 file:text-primary hover:file:bg-primary/20 disabled:opacity-50 cursor-pointer" />
                 
                 {isUploading && (
@@ -1574,7 +2199,7 @@ function AdminDashboard() {
                 </h3>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 sm:gap-8">
                   <div className="space-y-3">
-                    <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">ระดับชั้นที่อนุญาตให้เข้าสอบ</p>
+                    <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">ระดับชั้น</p>
                     {["ป.4", "ป.5", "ป.6"].map(grade => {
                       const isChecked = !!formData.permissions?.[grade as keyof typeof formData.permissions];
                       return (
@@ -1590,12 +2215,12 @@ function AdminDashboard() {
                   </div>
 
                   <div className="space-y-3">
-                    <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">แผนการเรียนที่อนุญาตให้เข้าสอบ</p>
+                    <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">แผนการเรียน</p>
                     {["ISM", "EP", "ภาคปกติ"].map(program => {
                       const isChecked = !!formData.permissions?.[program as keyof typeof formData.permissions];
                       return (
                         <label key={program} className={`flex items-center justify-between p-3 border rounded-xl cursor-pointer transition-all ${isChecked ? 'bg-white border-primary shadow-sm' : 'bg-slate-100/70 border-slate-200 hover:bg-white'}`}>
-                          <span className={`text-sm font-semibold ${isChecked ? 'text-primary' : 'text-slate-600'}`}>{program === "ภาคปกติ" ? "ภาคปกติ (Regular)" : `แผน ${program}`}</span>
+                          <span className={`text-sm font-semibold ${isChecked ? 'text-primary' : 'text-slate-600'}`}>{program}</span>
                           <div className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${isChecked ? 'bg-primary' : 'bg-slate-300'}`}>
                             <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${isChecked ? 'translate-x-6' : 'translate-x-1'}`} />
                           </div>
@@ -1633,7 +2258,7 @@ function AdminDashboard() {
 
                 <div className="space-y-4 bg-slate-50 p-4 rounded-2xl border border-slate-100">
                   <div>
-                    <label className="block text-xs font-bold text-slate-500 uppercase tracking-wide mb-2">ระดับชั้น (เลือกได้หลายชั้น)</label>
+                    <label className="block text-xs font-bold text-slate-500 uppercase tracking-wide mb-2">ระดับชั้น</label>
                     <div className="flex flex-wrap gap-2">
                       {["ป.4", "ป.5", "ป.6"].map(g => (
                         <button 
@@ -1652,7 +2277,7 @@ function AdminDashboard() {
                   </div>
 
                   <div>
-                    <label className="block text-xs font-bold text-slate-500 uppercase tracking-wide mb-2">แผนการเรียน (เลือกได้หลายแผน)</label>
+                    <label className="block text-xs font-bold text-slate-500 uppercase tracking-wide mb-2">แผนการเรียน</label>
                     <div className="flex flex-wrap gap-2">
                       {["ISM", "EP", "ภาคปกติ"].map(p => (
                         <button 
@@ -1664,7 +2289,7 @@ function AdminDashboard() {
                           }))} 
                           className={`px-4 py-2 border rounded-xl text-xs font-bold transition-all ${newExamInfo.program.includes(p) ? 'bg-primary text-white border-primary shadow-md' : 'bg-white text-slate-500 hover:bg-slate-100 border-slate-200'}`}
                         >
-                          {p === "ภาคปกติ" ? "ภาคปกติ (Regular)" : `แผน ${p}`}
+                          {p}
                         </button>
                       ))}
                     </div>
@@ -1771,7 +2396,7 @@ function AdminDashboard() {
                                 key={p} type="button" 
                                 onClick={() => setNewExamInfo(prev => ({ ...prev, program: prev.program.includes(p) ? prev.program.filter(x => x !== p) : [...prev.program, p] }))} 
                                 className={`px-2.5 py-1 rounded-xl text-xs font-bold border transition-colors ${newExamInfo.program.includes(p) ? 'bg-primary text-white border-primary shadow-sm' : 'bg-white text-slate-500 border-slate-200 hover:bg-slate-100'}`}
-                              >{p === "ภาคปกติ" ? "ภาคปกติ" : p}</button>
+                              >{p}</button>
                             ))}
                           </div>
                         </div>

@@ -3,7 +3,8 @@ import { useState, useEffect, useRef } from "react";
 import { 
   ChevronLeft, ChevronRight, CheckCircle2, X, Award, Lightbulb, 
   Check, XCircle, FileSearch, Eraser, PenTool, 
-  TrendingUp, BarChart2, Timer, Bookmark, ArrowRightCircle, RotateCcw
+  TrendingUp, Timer, Bookmark, ArrowRightCircle, RotateCcw,
+  Type, Shuffle, Printer
 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import SignatureCanvas from 'react-signature-canvas';
@@ -18,9 +19,28 @@ const DB_PROGRAM_MAP: Record<string, string> = {
   regular: "ภาคปกติ",
 };
 
-// ==========================================
-// 💡 คอมโพเนนต์ย่อย: กระดานทดเลข
-// ==========================================
+const playWarningBeep = () => {
+  try {
+    const AudioContext = window.AudioContext || (window as any).webkitAudioContext;
+    if (!AudioContext) return;
+    const ctx = new AudioContext();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+
+    osc.type = "sine";
+    osc.frequency.setValueAtTime(880, ctx.currentTime);
+    gain.gain.setValueAtTime(0.15, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.4);
+
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start();
+    osc.stop(ctx.currentTime + 0.4);
+  } catch (e) {
+    console.error("Audio warning error:", e);
+  }
+};
+
 const SubjectiveCanvas = ({ answer, onUpdate }: { answer: string; onUpdate: (val: string) => void }) => {
   const sigCanvas = useRef<any>(null);
 
@@ -79,21 +99,21 @@ const SubjectiveCanvas = ({ answer, onUpdate }: { answer: string; onUpdate: (val
   );
 };
 
-// ==========================================
-// 💡 คอมโพเนนต์หลัก: ExamSessionPage
-// ==========================================
 function ExamSessionPage() {
   const { program, subject, year } = Route.useParams();
   const navigate = useNavigate();
 
   const [student, setStudent] = useState<any>(null);
   const [examData, setExamData] = useState<any>(null);
+  const [questions, setQuestions] = useState<any[]>([]);
   
   const [currentIdx, setCurrentIdx] = useState(0);
   const [userAnswers, setUserAnswers] = useState<Record<number, any>>({});
   
   const [bookmarkedIndexes, setBookmarkedIndexes] = useState<number[]>([]);
   const [timeLeft, setTimeLeft] = useState<number>(5400);
+
+  const [fontSizeLevel, setFontSizeLevel] = useState<"normal" | "large" | "xlarge">("normal");
 
   const [isSubmitted, setIsSubmitted] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -102,7 +122,13 @@ function ExamSessionPage() {
   const [attemptCount, setAttemptCount] = useState<number>(1);
   const [activeResultCard, setActiveResultCard] = useState(0); 
 
-  // ✅ States สำหรับระบบ Drag / Swipe & Wheel
+  // State สำหรับ Modal เกียรติบัตร
+  const [showCertModal, setShowCertModal] = useState(false);
+  const certRef = useRef<HTMLDivElement>(null);
+
+  const hasAlerted5Min = useRef(false);
+
+  // States สำหรับระบบ Drag / Swipe & Wheel
   const [isDragging, setIsDragging] = useState(false);
   const [startX, setStartX] = useState(0);
   const [startY, setStartY] = useState(0);
@@ -116,7 +142,6 @@ function ExamSessionPage() {
     rankText: string;
   } | null>(null);
 
-  // 🖱️ ฟังก์ชันจัดการลาก (Drag / Swipe) ด้วยเมาส์และนิ้ว
   const handleDragStart = (e: React.MouseEvent | React.TouchEvent) => {
     setIsDragging(true);
     const clientX = 'touches' in e ? e.touches[0]?.clientX || 0 : (e as React.MouseEvent).clientX;
@@ -134,26 +159,26 @@ function ExamSessionPage() {
     const diffX = startX - clientX;
     const diffY = startY - clientY;
 
-    // เลื่อนถ้าลากไปซ้าย-ขวามากกว่าบน-ล่าง และลากยาวเกิน 50px
-    if (Math.abs(diffX) > Math.abs(diffY) && Math.abs(diffX) > 50) {
+    if (Math.abs(diffX) > Math.abs(diffY) && Math.abs(diffX) > 40) {
       if (diffX > 0) setActiveResultCard(prev => Math.min(examResult.details.length - 1, prev + 1));
       else setActiveResultCard(prev => Math.max(0, prev - 1));
     }
   };
 
-  // 🖱️ ฟังก์ชันจัดการลูกกลิ้งเมาส์ (Scroll Wheel)
   const handleWheel = (e: React.WheelEvent) => {
     if (wheelTimeout.current) return;
     
-    if (Math.abs(e.deltaX) > 20 || Math.abs(e.deltaY) > 20) {
-      if (e.deltaX > 0 || e.deltaY > 0) setActiveResultCard(prev => Math.min(examResult.details.length - 1, prev + 1));
-      else setActiveResultCard(prev => Math.max(0, prev - 1));
+    if (Math.abs(e.deltaX) > 15 || Math.abs(e.deltaY) > 15) {
+      if (e.deltaX > 0 || e.deltaY > 0) {
+        setActiveResultCard(prev => Math.min(examResult.details.length - 1, prev + 1));
+      } else {
+        setActiveResultCard(prev => Math.max(0, prev - 1));
+      }
       
-      wheelTimeout.current = setTimeout(() => { wheelTimeout.current = null }, 350); 
+      wheelTimeout.current = setTimeout(() => { wheelTimeout.current = null }, 250); 
     }
   };
 
-  // ดักจับการกดคีย์บอร์ดซ้าย-ขวา
   useEffect(() => {
     if (!showResultModal || !examResult) return;
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -178,9 +203,9 @@ function ExamSessionPage() {
   useEffect(() => {
     if (!examData || !student || isSubmitted) return;
     const storageKey = `exam_save_${examData.id}_student_${student.id}`;
-    const dataToSave = { userAnswers, currentIdx, bookmarkedIndexes, timeLeft };
+    const dataToSave = { userAnswers, currentIdx, bookmarkedIndexes, timeLeft, questions };
     localStorage.setItem(storageKey, JSON.stringify(dataToSave));
-  }, [userAnswers, currentIdx, bookmarkedIndexes, timeLeft, examData, student, isSubmitted]);
+  }, [userAnswers, currentIdx, bookmarkedIndexes, timeLeft, examData, student, isSubmitted, questions]);
 
   useEffect(() => {
     fetchSessionAndExam();
@@ -188,6 +213,11 @@ function ExamSessionPage() {
 
   useEffect(() => {
     if (!examData || isSubmitted || isSubmitting || examData.is_timed === false) return;
+
+    if (timeLeft === 300 && !hasAlerted5Min.current) {
+      hasAlerted5Min.current = true;
+      playWarningBeep();
+    }
 
     if (timeLeft <= 0) {
       alert("⏱️ หมดเวลาทำข้อสอบแล้ว! ระบบจะทำการตรวจและส่งคำตอบของคุณโดยอัตโนมัติ");
@@ -201,6 +231,29 @@ function ExamSessionPage() {
 
     return () => clearInterval(timer);
   }, [timeLeft, examData, isSubmitted, isSubmitting]);
+
+  const shuffleQuestionOptions = (rawQuestions: any[]) => {
+    return rawQuestions.map((q: any) => {
+      if (q.type !== "choice" || !Array.isArray(q.options) || q.options.length <= 1) return q;
+
+      const originalCorrectOption = q.options[q.correct_index];
+      const indexedOptions = q.options.map((opt: string, i: number) => ({ opt, originalIndex: i }));
+
+      for (let i = indexedOptions.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [indexedOptions[i], indexedOptions[j]] = [indexedOptions[j], indexedOptions[i]];
+      }
+
+      const newOptions = indexedOptions.map((item: any) => item.opt);
+      const newCorrectIndex = newOptions.findIndex((opt: string) => opt === originalCorrectOption);
+
+      return {
+        ...q,
+        options: newOptions,
+        correct_index: newCorrectIndex !== -1 ? newCorrectIndex : q.correct_index,
+      };
+    });
+  };
 
   const fetchSessionAndExam = async () => {
     const { data: { session } } = await supabase.auth.getSession();
@@ -244,7 +297,8 @@ function ExamSessionPage() {
     setExamData(fetchedExam);
     
     const previousAttempts = (currentStudent.examHistory || []).filter((h: any) => h.exam_id === fetchedExam.id);
-    setAttemptCount(previousAttempts.length + 1);
+    const currentAttemptNumber = previousAttempts.length + 1;
+    setAttemptCount(currentAttemptNumber);
 
     const storageKey = `exam_save_${fetchedExam.id}_student_${currentStudent.id}`;
     const savedData = localStorage.getItem(storageKey);
@@ -255,26 +309,38 @@ function ExamSessionPage() {
         setUserAnswers(parsed.userAnswers || {});
         setCurrentIdx(parsed.currentIdx || 0);
         setBookmarkedIndexes(parsed.bookmarkedIndexes || []);
+        if (parsed.questions && parsed.questions.length > 0) {
+          setQuestions(parsed.questions);
+        } else {
+          setQuestions(fetchedExam.questions || []);
+        }
         if (parsed.timeLeft !== undefined && fetchedExam.is_timed !== false) {
           setTimeLeft(parsed.timeLeft);
         } else if (fetchedExam.duration_minutes && fetchedExam.is_timed !== false) {
           setTimeLeft(Number(fetchedExam.duration_minutes) * 60);
         }
       } catch (e) {
+        setQuestions(fetchedExam.questions || []);
         if (fetchedExam.duration_minutes && fetchedExam.is_timed !== false) setTimeLeft(Number(fetchedExam.duration_minutes) * 60);
       }
     } else {
+      const baseQuestions = fetchedExam.questions || [];
+      if (currentAttemptNumber > 1) {
+        setQuestions(shuffleQuestionOptions(baseQuestions));
+      } else {
+        setQuestions(baseQuestions);
+      }
+
       if (fetchedExam.duration_minutes && fetchedExam.is_timed !== false) {
         setTimeLeft(Number(fetchedExam.duration_minutes) * 60);
       }
     }
   };
 
-  if (!examData || !student) {
+  if (!examData || !student || questions.length === 0) {
     return <div className="min-h-screen flex items-center justify-center text-slate-500 font-medium">กำลังเตรียมข้อสอบ...</div>;
   }
 
-  const questions = examData.questions || [];
   const currentQ = questions[currentIdx];
   const isLastQuestion = currentIdx === questions.length - 1;
   const answeredCount = Object.keys(userAnswers).filter(k => userAnswers[k as unknown as number] !== undefined && userAnswers[k as unknown as number] !== "").length;
@@ -314,6 +380,24 @@ function ExamSessionPage() {
     setUserAnswers(prev => ({ ...prev, [currentIdx]: text }));
   };
 
+  const cycleFontSize = () => {
+    if (fontSizeLevel === "normal") setFontSizeLevel("large");
+    else if (fontSizeLevel === "large") setFontSizeLevel("xlarge");
+    else setFontSizeLevel("normal");
+  };
+
+  const getQuestionFontSize = () => {
+    if (fontSizeLevel === "large") return "text-xl sm:text-2xl";
+    if (fontSizeLevel === "xlarge") return "text-2xl sm:text-3xl";
+    return "text-lg sm:text-xl";
+  };
+
+  const getChoiceFontSize = () => {
+    if (fontSizeLevel === "large") return "text-base sm:text-lg";
+    if (fontSizeLevel === "xlarge") return "text-lg sm:text-xl";
+    return "text-sm sm:text-base";
+  };
+
   const handleSubmitExam = async () => {
     if (isSubmitting) return;
     setIsSubmitting(true);
@@ -337,10 +421,15 @@ function ExamSessionPage() {
         return {
           qIndex: idx,
           question: q.question,
+          type: q.type || "choice",
+          options: q.options || [],
+          correct_index: q.correct_index,
+          subjective_answers: q.subjective_answers || [],
           isCorrect,
           userAnswer: uAns,
           correctAnswer: q.type === "choice" ? q.options[q.correct_index] : (q.subjective_answers || []).join(" หรือ "),
-          explanation: q.explanation || "ไม่มีคำอธิบายเพิ่มเติม"
+          explanation: q.explanation || "ไม่มีคำอธิบายเพิ่มเติม",
+          image_url: q.image_url || ""
         };
       });
 
@@ -409,6 +498,7 @@ function ExamSessionPage() {
           program: decodeURIComponent(program),
           qIndex: d.qIndex,
           question: d.question,
+          userAnswer: d.userAnswer,
           explanation: d.explanation,
           question_data: questions[d.qIndex]
         }));
@@ -488,7 +578,7 @@ function ExamSessionPage() {
               <h2 className="font-bold text-lg text-slate-800 line-clamp-1">{examData.title}</h2>
               {attemptCount > 1 && (
                 <span className="text-[10px] bg-amber-100 text-amber-800 border border-amber-200 font-bold px-2 py-0.5 rounded-lg shrink-0 flex items-center gap-1">
-                  <RotateCcw className="size-3" /> รอบที่ {attemptCount}
+                  <Shuffle className="size-3" /> สลับช้อยส์ (รอบ {attemptCount})
                 </span>
               )}
             </div>
@@ -497,11 +587,20 @@ function ExamSessionPage() {
         </div>
 
         <div className="flex items-center justify-between sm:justify-end w-full sm:w-auto gap-3">
+          <button
+            onClick={cycleFontSize}
+            className="flex items-center gap-1.5 px-3 py-2 rounded-xl border border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-700 text-xs font-bold transition shadow-sm"
+            title="ปรับขนาดตัวอักษร"
+          >
+            <Type className="size-4 text-primary" />
+            <span>{fontSizeLevel === "normal" ? "ขนาดปกติ" : fontSizeLevel === "large" ? "ขนาดใหญ่" : "ใหญ่พิเศษ"}</span>
+          </button>
+
           {!isSubmitted && examData.is_timed !== false && (
             <div className={`flex items-center gap-2 px-3.5 py-2 rounded-xl border font-mono font-bold text-sm transition-colors ${
-              isTimeCritical ? "bg-red-50 text-red-600 border-red-200 animate-pulse" : "bg-slate-50 text-slate-700 border-slate-200"
+              isTimeCritical ? "bg-red-50 text-red-600 border-red-200 animate-pulse ring-2 ring-red-400/40" : "bg-slate-50 text-slate-700 border-slate-200"
             }`}>
-              <Timer className={`size-4 ${isTimeCritical ? "text-red-500" : "text-slate-500"}`} />
+              <Timer className={`size-4 ${isTimeCritical ? "text-red-500 animate-bounce" : "text-slate-500"}`} />
               <span>{formatTime(timeLeft)}</span>
             </div>
           )}
@@ -560,7 +659,9 @@ function ExamSessionPage() {
               </button>
             </div>
 
-            <p className="text-lg font-semibold text-slate-800 leading-relaxed mb-6 whitespace-pre-line">{currentQ?.question}</p>
+            <p className={`font-semibold text-slate-800 leading-relaxed mb-6 whitespace-pre-line ${getQuestionFontSize()}`}>
+              {currentQ?.question}
+            </p>
 
             {currentQ?.image_url && (
               <div className="mb-6 flex justify-center">
@@ -576,13 +677,13 @@ function ExamSessionPage() {
                     <button
                       key={optIdx}
                       onClick={() => handleSelectChoice(optIdx)}
-                      className={`p-4 rounded-xl border text-left text-sm font-medium transition flex items-center gap-3 ${
+                      className={`p-4 rounded-xl border text-left font-medium transition flex items-center gap-3 ${getChoiceFontSize()} ${
                         isSelected 
                           ? "border-primary bg-primary/5 text-primary ring-1 ring-primary font-bold shadow-sm" 
                           : "border-slate-200 hover:bg-slate-50 text-slate-700"
                       }`}
                     >
-                      <span className={`size-6 shrink-0 rounded-full flex items-center justify-center text-xs border ${isSelected ? "bg-primary text-white border-primary" : "border-slate-300"}`}>
+                      <span className={`size-7 shrink-0 rounded-full flex items-center justify-center text-xs font-bold border ${isSelected ? "bg-primary text-white border-primary" : "border-slate-300"}`}>
                         {choiceLabels[optIdx] || optIdx + 1}
                       </span>
                       <span className="leading-relaxed">{opt}</span>
@@ -696,11 +797,13 @@ function ExamSessionPage() {
         </div>
       </div>
 
-      {/* ✅ POPUP RESULT: ซ้ายคะแนน (ชิดขอบ) ขวาเฉลย (ใบเดียวใหญ่เต็มจอ) */}
+      {/* ✅ POPUP RESULT พร้อมรองรับ Scroll Wheel เลื่อนสลับข้อ */}
       {showResultModal && examResult && (
-        <div className="fixed inset-0 z-[100] flex flex-col lg:flex-row bg-slate-900/95 backdrop-blur-md overflow-hidden p-0 m-0">
-          
-          {/* ⬅️ ซ้าย: แผงสรุปคะแนน (ตั้ง z-index ให้ทับการ์ดและชิดขอบจอ) */}
+        <div 
+          className="fixed inset-0 z-[100] flex flex-col lg:flex-row bg-slate-900/95 backdrop-blur-md overflow-hidden p-0 m-0"
+          onWheel={handleWheel}
+        >
+          {/* ⬅️ ซ้าย: แผงสรุปคะแนน */}
           <div className="w-full lg:w-[400px] h-[35vh] lg:h-full bg-white flex flex-col shadow-[10px_0_30px_rgba(0,0,0,0.2)] shrink-0 overflow-y-auto custom-scrollbar z-50 rounded-b-3xl lg:rounded-none lg:rounded-r-3xl">
             <div className="p-6 sm:p-8 flex-1 flex flex-col">
               <div className="text-center pb-6 border-b border-slate-100">
@@ -709,7 +812,7 @@ function ExamSessionPage() {
                 <p className="text-sm font-medium text-slate-500 mt-1 line-clamp-2">{examData.title}</p>
                 {attemptCount > 1 && (
                   <span className="text-[10px] bg-amber-100 text-amber-800 font-bold px-3 py-1 rounded-full mt-3 inline-block border border-amber-200">
-                    รอบที่ {attemptCount} (ฝึกซ้ำ)
+                    รอบที่ {attemptCount} (สลับช้อยส์)
                   </span>
                 )}
               </div>
@@ -749,6 +852,16 @@ function ExamSessionPage() {
                 )}
               </div>
 
+              {/* ปุ่มรับเกียรติบัตร (ผ่านเกณฑ์ 70% ขึ้นไป) */}
+              {examResult.percentage >= 70 && (
+                <button 
+                  onClick={() => setShowCertModal(true)}
+                  className="w-full py-3.5 mb-3 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-white rounded-2xl font-bold transition shadow-md text-xs sm:text-sm flex items-center justify-center gap-2 shrink-0"
+                >
+                  <Award className="size-4" /> รับเกียรติบัตรผลการสอบ 🏆
+                </button>
+              )}
+
               <button 
                 onClick={() => { setShowResultModal(false); navigate({ to: "/programs" }); }}
                 className="w-full py-4 mt-auto bg-slate-800 hover:bg-slate-900 text-white rounded-2xl font-bold transition shadow-md text-sm shrink-0"
@@ -758,7 +871,7 @@ function ExamSessionPage() {
             </div>
           </div>
 
-          {/* ➡️ ขวา: Slider เฉลยข้อสอบ (แบนราบ ใบเดียวใหญ่ๆ) พร้อมระบบลาก & สกรอลล์ */}
+          {/* ➡️ ขวา: Slider เฉลยข้อสอบ (แสดงครบทั้งโจทย์และ Choice ทั้งหมด) */}
           <div 
             className="flex-1 relative flex items-center justify-center h-[65vh] lg:h-full p-4 lg:p-10 select-none z-10"
             onMouseDown={handleDragStart}
@@ -766,10 +879,7 @@ function ExamSessionPage() {
             onMouseLeave={(e) => { if(isDragging) handleDragEnd(e) }}
             onTouchStart={handleDragStart}
             onTouchEnd={handleDragEnd}
-            onWheel={handleWheel}
           >
-             
-             {/* ปุ่มปิด (วางไว้นอกสุดมุมขวาบน) */}
              <button 
                 onClick={() => { setShowResultModal(false); navigate({ to: "/programs" }); }} 
                 className="absolute right-4 top-4 lg:right-8 lg:top-8 p-3 bg-white/10 hover:bg-white/30 text-white rounded-full transition z-50 backdrop-blur-md border border-white/20"
@@ -777,7 +887,6 @@ function ExamSessionPage() {
                 <X className="size-6" />
               </button>
 
-             {/* ปุ่มซ้ายขวา */}
              <button 
                onClick={() => setActiveResultCard(prev => Math.max(0, prev - 1))}
                disabled={activeResultCard === 0}
@@ -794,14 +903,11 @@ function ExamSessionPage() {
                <ChevronRight className="size-6 sm:size-8" />
              </button>
 
-             {/* พื้นที่สไลด์การ์ดแบบแบนราบ */}
              <div className="w-full h-full max-w-5xl relative flex items-center justify-center">
                 {examResult.details.map((d: any, index: number) => {
-                   const isCenter = index === activeResultCard;
                    const isLeft = index < activeResultCard;
                    const isRight = index > activeResultCard;
 
-                   // กำหนดตำแหน่งและสถานะของการ์ดแต่ละใบ
                    let transform = "translateX(0%) scale(1)";
                    let opacity = "opacity-100";
                    let zIndex = "z-10";
@@ -825,7 +931,6 @@ function ExamSessionPage() {
                        className={`absolute w-[95%] sm:w-[85%] lg:w-full h-[95%] lg:h-[85vh] bg-white rounded-3xl flex flex-col shadow-2xl transition-all duration-500 ease-in-out ${opacity} ${zIndex} ${pointerEvents}`}
                        style={{ transform }}
                      >
-                        {/* หัวการ์ดเฉลย */}
                         <div className={`p-5 sm:p-6 lg:p-8 shrink-0 flex flex-col gap-3 rounded-t-3xl ${d.isCorrect ? "bg-emerald-50 border-b border-emerald-100" : "bg-red-50 border-b border-red-100"}`}>
                            <div className="flex items-center justify-between">
                              <span className="bg-slate-800 text-white text-xs font-bold px-4 py-1.5 rounded-full shadow-sm">
@@ -842,41 +947,81 @@ function ExamSessionPage() {
                            </p>
                         </div>
 
-                        {/* เนื้อหาด้านในการ์ด (เลื่อน Scroll ได้) */}
                         <div 
-                          className="flex-1 p-5 sm:p-8 lg:p-10 overflow-y-auto custom-scrollbar relative bg-slate-50/50"
-                          // 🛑 ป้องกันไม่ให้การ Scroll เมาส์ด้านใน หรือลากนิ้วอ่านเฉลย ไปเผลอเลื่อนเปลี่ยนข้อ
-                          onWheel={(e) => e.stopPropagation()} 
-                          onMouseDown={(e) => e.stopPropagation()} 
-                          onTouchStart={(e) => e.stopPropagation()} 
+                          className="flex-1 p-5 sm:p-8 lg:p-10 overflow-y-auto custom-scrollbar relative bg-slate-50/50 space-y-6"
                         >
-                           {questions[index]?.image_url && (
-                             <div className="mb-8 flex justify-center bg-white p-4 rounded-2xl border border-slate-100 shadow-sm">
+                           {questions[index]?.image_url && questions[index].image_url !== "NEEDS_IMAGE" && (
+                             <div className="flex justify-center bg-white p-4 rounded-2xl border border-slate-100 shadow-sm">
                                <img src={questions[index].image_url} alt="Question Graphic" className="max-h-64 object-contain rounded-xl select-none pointer-events-none" />
                              </div>
                            )}
 
-                           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 lg:gap-6 text-sm sm:text-base mb-8">
-                             <div className={`p-6 rounded-2xl border shadow-sm ${d.isCorrect ? "bg-emerald-100/40 border-emerald-200 text-emerald-900" : "bg-red-100/40 border-red-200 text-red-900"}`}>
-                               <p className="text-xs font-bold mb-2 opacity-60 uppercase tracking-wider">คำตอบที่คุณเลือก:</p>
-                               <p className="font-bold leading-relaxed text-lg">{d.userAnswer !== undefined && d.userAnswer !== "" ? 
-                                 (questions[index].type === "choice" ? questions[index].options[d.userAnswer] : d.userAnswer) 
-                                 : "ไม่ได้ตอบ"}</p>
-                             </div>
-                             {!d.isCorrect && (
-                               <div className="p-6 rounded-2xl border shadow-sm bg-emerald-50 border-emerald-200 text-emerald-900">
-                                 <p className="text-xs font-bold mb-2 opacity-60 uppercase tracking-wider">เฉลยที่ถูกต้อง:</p>
-                                 <p className="font-bold leading-relaxed text-lg">{d.correctAnswer}</p>
+                           {/* แสดงรายการ Choice ทั้งหมด */}
+                           {d.type === "choice" ? (
+                             <div className="space-y-2.5">
+                               <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">ตัวเลือกทั้งหมด:</p>
+                               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                 {d.options.map((opt: string, optIdx: number) => {
+                                   const isCorrectChoice = optIdx === d.correct_index;
+                                   const isUserChoice = d.userAnswer === optIdx;
+
+                                   let choiceBoxStyle = "border-slate-200 bg-white text-slate-700 shadow-sm";
+                                   let badgeStyle = "bg-slate-100 text-slate-700 border-slate-200";
+
+                                   if (isCorrectChoice) {
+                                     choiceBoxStyle = "border-emerald-400 bg-emerald-50/90 text-emerald-950 font-bold ring-1 ring-emerald-400 shadow-sm";
+                                     badgeStyle = "bg-emerald-600 text-white border-emerald-600";
+                                   } else if (isUserChoice && !d.isCorrect) {
+                                     choiceBoxStyle = "border-rose-400 bg-rose-50 text-rose-950 font-bold ring-1 ring-rose-400";
+                                     badgeStyle = "bg-rose-600 text-white border-rose-600";
+                                   }
+
+                                   return (
+                                     <div 
+                                       key={optIdx}
+                                       className={`p-3.5 rounded-2xl border text-sm flex items-center justify-between gap-3 transition-all ${choiceBoxStyle}`}
+                                     >
+                                       <div className="flex items-center gap-3">
+                                         <span className={`size-7 rounded-xl flex items-center justify-center text-xs font-black border shrink-0 ${badgeStyle}`}>
+                                           {choiceLabels[optIdx] || optIdx + 1}
+                                         </span>
+                                         <span className="leading-relaxed">{opt}</span>
+                                       </div>
+
+                                       {isCorrectChoice && (
+                                         <span className="text-[10px] font-black uppercase text-emerald-700 bg-emerald-200/80 px-2 py-0.5 rounded-md shrink-0">
+                                           ✓ เฉลยที่ถูก
+                                         </span>
+                                       )}
+                                       {isUserChoice && !d.isCorrect && (
+                                         <span className="text-[10px] font-black uppercase text-rose-700 bg-rose-200/80 px-2 py-0.5 rounded-md shrink-0">
+                                           ✗ คำตอบของคุณ
+                                         </span>
+                                       )}
+                                     </div>
+                                   );
+                                 })}
                                </div>
-                             )}
-                           </div>
+                             </div>
+                           ) : (
+                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                               <div className={`p-5 rounded-2xl border shadow-sm ${d.isCorrect ? "bg-emerald-100/40 border-emerald-200 text-emerald-900" : "bg-red-100/40 border-red-200 text-red-900"}`}>
+                                 <p className="text-xs font-bold mb-1 opacity-60 uppercase tracking-wider">คำตอบที่คุณเขียน:</p>
+                                 <p className="font-bold leading-relaxed text-base">{d.userAnswer || "ไม่ได้ตอบ"}</p>
+                               </div>
+                               <div className="p-5 rounded-2xl border shadow-sm bg-emerald-50 border-emerald-200 text-emerald-900">
+                                 <p className="text-xs font-bold mb-1 opacity-60 uppercase tracking-wider">เฉลยที่ถูกต้อง:</p>
+                                 <p className="font-bold leading-relaxed text-base">{d.correctAnswer}</p>
+                               </div>
+                             </div>
+                           )}
 
                            {d.explanation && d.explanation !== "ไม่มีคำอธิบายเพิ่มเติม" && (
                              <div className="p-6 sm:p-8 bg-white rounded-3xl border border-slate-200 shadow-sm">
-                               <span className="font-bold flex items-center gap-2 text-primary mb-5 text-lg">
-                                 <Lightbulb className="size-6" /> วิธีทำอย่างละเอียด:
+                               <span className="font-bold flex items-center gap-2 text-primary mb-3 text-base">
+                                 <Lightbulb className="size-5 text-amber-500" /> วิธีทำอย่างละเอียด:
                                </span>
-                               <div className="whitespace-pre-line leading-loose text-slate-700 text-base lg:text-lg select-text">{d.explanation}</div>
+                               <div className="whitespace-pre-line leading-loose text-slate-700 text-sm sm:text-base select-text">{d.explanation}</div>
                              </div>
                            )}
                         </div>
@@ -885,7 +1030,6 @@ function ExamSessionPage() {
                 })}
              </div>
              
-             {/* จุด Indicator ด้านล่าง (กดข้ามข้อได้) */}
              <div className="absolute bottom-2 lg:bottom-6 left-1/2 -translate-x-1/2 flex items-center gap-2 z-50 bg-black/40 px-4 py-2.5 rounded-full backdrop-blur-md max-w-[80%] overflow-x-auto custom-scrollbar">
                 {examResult.details.map((_: any, i: number) => (
                    <div 
@@ -895,6 +1039,85 @@ function ExamSessionPage() {
                    />
                 ))}
              </div>
+
+          </div>
+        </div>
+      )}
+
+      {/* ✅ Modal: เกียรติบัตรรับรองผลสอบ */}
+      {showCertModal && (
+        <div className="fixed inset-0 z-[110] flex items-center justify-center bg-slate-950/80 backdrop-blur-md p-4 animate-in fade-in duration-200">
+          <div className="bg-white w-full max-w-3xl rounded-[2.5rem] shadow-2xl flex flex-col overflow-hidden animate-in zoom-in-95">
+            
+            <div className="p-4 border-b border-slate-100 flex items-center justify-between bg-slate-50">
+              <div className="flex items-center gap-2">
+                <Award className="size-5 text-amber-600" />
+                <span className="font-bold text-sm text-slate-800">เกียรติบัตรรับรองผลการสอบ</span>
+              </div>
+              <button onClick={() => setShowCertModal(false)} className="p-2 text-slate-400 hover:text-slate-700 rounded-full">
+                <X className="size-5"/>
+              </button>
+            </div>
+
+            <div className="p-8 sm:p-12 overflow-y-auto flex justify-center bg-slate-100/50">
+              <div 
+                ref={certRef}
+                className="w-full max-w-2xl bg-gradient-to-br from-amber-50/60 via-white to-amber-50/40 p-8 sm:p-12 rounded-3xl border-8 border-double border-amber-300 shadow-xl text-center relative overflow-hidden"
+              >
+                <div className="absolute top-0 right-0 size-32 bg-amber-200/30 rounded-full blur-2xl pointer-events-none" />
+                <div className="absolute bottom-0 left-0 size-32 bg-teal-200/30 rounded-full blur-2xl pointer-events-none" />
+
+                <div className="flex justify-center mb-4">
+                  <span className="p-4 bg-amber-100 text-amber-600 rounded-full shadow-inner border border-amber-200">
+                    <Award className="size-12" />
+                  </span>
+                </div>
+
+                <p className="text-xs font-extrabold uppercase tracking-widest text-amber-800/80">CERTIFICATE OF ACHIEVEMENT</p>
+                <h2 className="text-2xl sm:text-3xl font-black text-slate-800 mt-1 mb-6">เกียรติบัตรผ่านเกณฑ์มาตรฐาน</h2>
+
+                <p className="text-xs sm:text-sm text-slate-500 mb-2">ขอมอบเกียรติบัตรฉบับนี้เพื่อแสดงว่า</p>
+                <p className="text-xl sm:text-2xl font-black text-primary mb-6 underline decoration-amber-300 decoration-wavy underline-offset-8">
+                  {student.name || student.email}
+                </p>
+
+                <p className="text-xs sm:text-sm text-slate-600 max-w-md mx-auto leading-relaxed">
+                  ได้ผ่านการทดสอบวัดประเมินผลในชุดข้อสอบ <br />
+                  <span className="font-bold text-slate-800 text-sm sm:text-base">"{examData.title}"</span>
+                </p>
+
+                <div className="inline-flex items-center gap-6 my-6 bg-white/80 border border-amber-200/80 px-6 py-3 rounded-2xl shadow-sm">
+                  <div>
+                    <p className="text-[10px] font-bold text-slate-400 uppercase">คะแนนที่ได้</p>
+                    <p className="text-lg font-black text-emerald-600">{examResult.score} / {examResult.total}</p>
+                  </div>
+                  <div className="w-px h-8 bg-slate-200" />
+                  <div>
+                    <p className="text-[10px] font-bold text-slate-400 uppercase">คิดเป็น</p>
+                    <p className="text-lg font-black text-amber-600">{examResult.percentage}%</p>
+                  </div>
+                </div>
+
+                <p className="text-xs text-slate-400 mt-2">
+                  ให้ไว้ ณ วันที่ {new Date().toLocaleDateString("th-TH")} • Exam Vault Thailand
+                </p>
+              </div>
+            </div>
+
+            <div className="p-4 border-t border-slate-100 bg-white flex gap-3">
+              <button 
+                onClick={() => setShowCertModal(false)}
+                className="flex-1 py-3 border border-slate-200 rounded-2xl text-xs font-bold text-slate-600 hover:bg-slate-50"
+              >
+                ปิดหน้าต่าง
+              </button>
+              <button 
+                onClick={() => window.print()}
+                className="flex-1 py-3 bg-amber-500 hover:bg-amber-600 text-white rounded-2xl text-xs font-bold transition flex items-center justify-center gap-2 shadow-md"
+              >
+                <Printer className="size-4" /> พิมพ์ / บันทึก PDF
+              </button>
+            </div>
 
           </div>
         </div>

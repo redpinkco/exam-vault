@@ -1,6 +1,10 @@
 import { createFileRoute, Link, notFound } from "@tanstack/react-router";
 import { useEffect, useState, useRef } from "react";
-import { ChevronRight, FileText, Play, Timer, BookOpen, PenTool, Loader2, Eraser, Video, FilePenLine, ChevronLeft, Layers } from "lucide-react";
+import { 
+  ChevronRight, FileText, Play, Timer, BookOpen, PenTool, 
+  Loader2, Eraser, Video, FilePenLine, ChevronLeft, Layers, 
+  CheckCircle2, Shuffle, RotateCcw, ExternalLink
+} from "lucide-react";
 import { PageShell } from "@/components/PageShell";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -22,7 +26,6 @@ const DB_PROGRAM_MAP: Record<string, string> = {
   regular: "ภาคปกติ",
 };
 
-// ฟังก์ชันจัดกลุ่มชื่อวิชาแบบตรงตัว ไม่ให้ 'คณิต' ไปทับกับ 'ความถนัดด้านคณิตศาสตร์'
 const normalizeSubject = (name: string) => {
   const n = name.trim().toLowerCase();
   if (n === "คณิต" || n === "คณิตศาสตร์" || n === "math") return "คณิตศาสตร์";
@@ -39,7 +42,6 @@ const matchSubject = (dbSubject: string | undefined, selectedSubject: string) =>
   return normalizeSubject(dbSubject) === normalizeSubject(selectedSubject);
 };
 
-// 💡 กระดานทดเลข / ฝึกเขียน (ลบระบบ AI อ่านลายมือออกแล้ว — AI ใช้เฉพาะฝั่ง admin เท่านั้น)
 const SmartPracticeCanvas = ({ subject }: { subject: string }) => {
   const sigCanvas = useRef<any>(null);
 
@@ -89,40 +91,94 @@ function ExamHub() {
   const [subject, setSubject] = useState<string>("all");
   const [year, setYear] = useState<string>("all");
 
+  const [student, setStudent] = useState<any>(null);
   const [allPapers, setAllPapers] = useState<any[]>([]);
   const [allLessons, setAllLessons] = useState<any[]>([]);
   const [allWorksheets, setAllWorksheets] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    const fetchData = async () => {
-      setIsLoading(true);
-      const dbProgram = DB_PROGRAM_MAP[program.id];
+    fetchInitialData();
+  }, [program.id]);
 
+  const fetchInitialData = async () => {
+    setIsLoading(true);
+    const dbProgram = DB_PROGRAM_MAP[program.id] || program.name;
+
+    try {
+      // 1. ดึงข้อมูล User ปัจจุบัน
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session?.user?.email) {
+        const { data: studentData } = await supabase
+          .from("students")
+          .select("*")
+          .eq("email", session.user.email)
+          .maybeSingle();
+        if (studentData) setStudent(studentData);
+      }
+
+      // 2. ดึงข้อสอบ
       const { data: examsData } = await supabase
         .from("exams")
         .select("*")
         .ilike("program", `%${dbProgram}%`)
-        .eq("status", "published");
+        .eq("status", "published")
+        .order("year", { ascending: false });
       if (examsData) setAllPapers(examsData);
 
+      // 3. ดึงบทเรียน
       const { data: lessonsData } = await supabase
         .from("lessons")
         .select("*")
-        .ilike("program", `%${dbProgram}%`);
+        .ilike("program", `%${dbProgram}%`)
+        .order("id", { ascending: false });
       if (lessonsData) setAllLessons(lessonsData);
 
+      // 4. ดึงแบบฝึกหัด
       const { data: worksheetsData } = await supabase
         .from("worksheets")
         .select("*")
-        .ilike("program", `%${dbProgram}%`);
+        .ilike("program", `%${dbProgram}%`)
+        .order("id", { ascending: false });
       if (worksheetsData) setAllWorksheets(worksheetsData);
 
+    } catch (err) {
+      console.error("Fetch Hub Data Error:", err);
+    } finally {
       setIsLoading(false);
-    };
+    }
+  };
 
-    fetchData();
-  }, [program.id]);
+  // ✅ ฟังก์ชันบันทึกประวัติการเข้าดูบทเรียนวิดีโอ
+  const handleRecordLessonView = async (lesson: any) => {
+    if (!student || !student.email) return;
+
+    try {
+      const currentLessons = Array.isArray(student.lessonHistory) ? student.lessonHistory : [];
+      const isAlreadyRecorded = currentLessons.some((l: any) => l.lesson_id === lesson.id);
+
+      const newRecord = {
+        id: Date.now(),
+        lesson_id: lesson.id,
+        title: lesson.title,
+        subject: lesson.subject,
+        program: program.name,
+        date: new Date().toLocaleDateString("th-TH", { year: "numeric", month: "short", day: "numeric" }),
+        last_accessed: new Date().toISOString()
+      };
+
+      const updatedHistory = [newRecord, ...currentLessons.filter((l: any) => l.lesson_id !== lesson.id)];
+
+      await supabase
+        .from("students")
+        .update({ lessonHistory: updatedHistory })
+        .eq("email", student.email);
+
+      setStudent((prev: any) => ({ ...prev, lessonHistory: updatedHistory }));
+    } catch (e) {
+      console.error("Failed to record lesson view:", e);
+    }
+  };
 
   const papers = allPapers.filter(
     (p) => matchSubject(p.subject, subject) && (year === "all" || String(p.year) === year)
@@ -151,11 +207,11 @@ function ExamHub() {
             <h1 className="text-3xl sm:text-4xl font-black text-slate-900 tracking-tight">
               ศูนย์สอบ {program.name}
             </h1>
-            <p className="mt-1 text-xs sm:text-sm text-slate-500">{program.fullName}</p>
+            <p className="mt-1 text-xs sm:text-sm text-slate-500 font-medium">{program.fullName}</p>
           </div>
 
           {/* Mode Selector */}
-          <div className="flex bg-white/70 backdrop-blur-md p-1.5 rounded-2xl border border-slate-200/80 shadow-sm overflow-x-auto w-full lg:w-auto">
+          <div className="flex bg-white/80 backdrop-blur-md p-1.5 rounded-2xl border border-slate-200/80 shadow-sm overflow-x-auto w-full lg:w-auto">
             <button
               onClick={() => setActiveMode("study")}
               className={`flex-1 lg:flex-initial shrink-0 flex items-center justify-center gap-2 py-2.5 px-5 rounded-xl text-xs sm:text-sm font-bold transition-all ${
@@ -164,7 +220,7 @@ function ExamHub() {
                   : "text-slate-500 hover:text-slate-800"
               }`}
             >
-              <BookOpen className="size-4" /> ห้องเรียน
+              <BookOpen className="size-4" /> ห้องเรียน ({lessons.length})
             </button>
 
             <button
@@ -175,7 +231,7 @@ function ExamHub() {
                   : "text-slate-500 hover:text-slate-800"
               }`}
             >
-              <FilePenLine className="size-4" /> แบบฝึกหัด
+              <FilePenLine className="size-4" /> แบบฝึกหัด ({worksheets.length})
             </button>
 
             <button
@@ -186,7 +242,7 @@ function ExamHub() {
                   : "text-slate-500 hover:text-slate-800"
               }`}
             >
-              <PenTool className="size-4" /> คลังข้อสอบ
+              <PenTool className="size-4" /> คลังข้อสอบ ({papers.length})
             </button>
           </div>
         </div>
@@ -274,9 +330,10 @@ function ExamHub() {
                             href={lesson.video_url}
                             target="_blank"
                             rel="noreferrer"
+                            onClick={() => handleRecordLessonView(lesson)}
                             className="flex-1 min-w-[130px] flex items-center justify-center gap-2 bg-rose-50 text-rose-700 hover:bg-rose-100 px-4 py-2.5 rounded-2xl text-xs font-bold transition-all border border-rose-200/60 shadow-sm"
                           >
-                            <Video className="size-4" /> ดูวิดีโอสอน
+                            <Video className="size-4" /> ดูวิดีโอสอน <ExternalLink className="size-3 opacity-60" />
                           </a>
                         )}
                         {lesson.pdf_url && (
@@ -286,7 +343,7 @@ function ExamHub() {
                             rel="noreferrer"
                             className="flex-1 min-w-[130px] flex items-center justify-center gap-2 bg-blue-50 text-blue-700 hover:bg-blue-100 px-4 py-2.5 rounded-2xl text-xs font-bold transition-all border border-blue-200/60 shadow-sm"
                           >
-                            <FileText className="size-4" /> เอกสาร PDF
+                            <FileText className="size-4" /> เอกสาร PDF <ExternalLink className="size-3 opacity-60" />
                           </a>
                         )}
                       </div>
@@ -374,6 +431,7 @@ function ExamHub() {
                 </SelectTrigger>
                 <SelectContent className="rounded-2xl">
                   <SelectItem value="all">ทุกปีการศึกษา</SelectItem>
+                  <SelectItem value="2567">ปีการศึกษา 2567</SelectItem>
                   <SelectItem value="2566">ปีการศึกษา 2566</SelectItem>
                   <SelectItem value="2565">ปีการศึกษา 2565</SelectItem>
                   <SelectItem value="2564">ปีการศึกษา 2564</SelectItem>
@@ -390,42 +448,76 @@ function ExamHub() {
               </div>
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-                {papers.map((paper) => (
-                  <div
-                    key={paper.id}
-                    className="backdrop-blur-xl bg-white/85 border border-white/90 p-6 sm:p-7 rounded-3xl shadow-[0_10px_35px_rgba(0,0,0,0.04)] hover:shadow-lg transition-all flex flex-col justify-between group"
-                  >
-                    <div>
-                      <div className="flex items-center justify-between mb-3">
-                        <span className="text-[11px] font-black px-3 py-1 rounded-xl bg-slate-100 text-slate-600 border border-slate-200">
-                          ปี {paper.year}
-                        </span>
-                        <span className="text-xs font-bold text-primary bg-primary/10 px-3 py-1 rounded-xl border border-primary/20">
-                          วิชา {paper.subject}
-                        </span>
-                      </div>
+                {papers.map((paper) => {
+                  // ค้นหาประวัติการทำข้อสอบชุดนี้ของนักเรียน
+                  const studentHistoryList = Array.isArray(student?.examHistory) ? student.examHistory : [];
+                  const examAttempts = studentHistoryList.filter((h: any) => h.exam_id === paper.id);
+                  const latestAttempt = examAttempts[examAttempts.length - 1];
+                  const hasTaken = examAttempts.length > 0;
 
-                      <h3 className="text-base sm:text-lg font-black text-slate-800 mt-2 line-clamp-2">{paper.title}</h3>
-
-                      <div className="mt-4 flex items-center gap-3 text-xs font-bold text-slate-500">
-                        <span className="flex items-center gap-1.5 bg-slate-50 px-2.5 py-1.5 rounded-xl border border-slate-100">
-                          <FileText className="size-3.5 text-slate-400" /> {paper.total_questions || paper.questions?.length || 0} ข้อ
-                        </span>
-                        <span className="flex items-center gap-1.5 bg-slate-50 px-2.5 py-1.5 rounded-xl border border-slate-100">
-                          <Timer className="size-3.5 text-slate-400" /> {paper.is_timed === false ? "ไม่จับเวลา" : `${paper.duration_minutes || 90} นาที`}
-                        </span>
-                      </div>
-                    </div>
-
-                    <Link
-                      to="/exam/$program/$subject/$year"
-                      params={{ program: program.id, subject: paper.subject, year: String(paper.year) }}
-                      className="mt-6 w-full py-3.5 bg-gradient-to-r from-teal-600 to-primary text-white font-bold rounded-2xl shadow-[0_4px_0_0_#0f766e] active:translate-y-0.5 active:shadow-none transition-all flex items-center justify-center gap-2 text-xs sm:text-sm"
+                  return (
+                    <div
+                      key={paper.id}
+                      className="backdrop-blur-xl bg-white/85 border border-white/90 p-6 sm:p-7 rounded-3xl shadow-[0_10px_35px_rgba(0,0,0,0.04)] hover:shadow-lg transition-all flex flex-col justify-between group"
                     >
-                      <Play className="size-4 fill-white" /> เริ่มทำข้อสอบชุดนี้
-                    </Link>
-                  </div>
-                ))}
+                      <div>
+                        <div className="flex items-center justify-between mb-3">
+                          <span className="text-[11px] font-black px-3 py-1 rounded-xl bg-slate-100 text-slate-600 border border-slate-200">
+                            ปี {paper.year}
+                          </span>
+                          <span className="text-xs font-bold text-primary bg-primary/10 px-3 py-1 rounded-xl border border-primary/20">
+                            วิชา {paper.subject}
+                          </span>
+                        </div>
+
+                        <h3 className="text-base sm:text-lg font-black text-slate-800 mt-2 line-clamp-2">{paper.title}</h3>
+
+                        {/* Badges สถานะการทำข้อสอบ */}
+                        <div className="mt-3 flex flex-wrap gap-2">
+                          {hasTaken && (
+                            <span className="inline-flex items-center gap-1 text-[11px] font-bold px-2.5 py-1 rounded-lg bg-emerald-50 text-emerald-700 border border-emerald-200">
+                              <CheckCircle2 className="size-3.5" /> ทำแล้ว (รอบที่ {examAttempts.length}) • {latestAttempt?.score}/{latestAttempt?.total}
+                            </span>
+                          )}
+                          {paper.shuffle_questions && (
+                            <span className="inline-flex items-center gap-1 text-[11px] font-bold px-2.5 py-1 rounded-lg bg-teal-50 text-teal-700 border border-teal-200">
+                              <Shuffle className="size-3" /> สลับช้อยส์
+                            </span>
+                          )}
+                        </div>
+
+                        <div className="mt-4 flex items-center gap-3 text-xs font-bold text-slate-500">
+                          <span className="flex items-center gap-1.5 bg-slate-50 px-2.5 py-1.5 rounded-xl border border-slate-100">
+                            <FileText className="size-3.5 text-slate-400" /> {paper.total_questions || paper.questions?.length || 0} ข้อ
+                          </span>
+                          <span className="flex items-center gap-1.5 bg-slate-50 px-2.5 py-1.5 rounded-xl border border-slate-100">
+                            <Timer className="size-3.5 text-slate-400" /> {paper.is_timed === false ? "ไม่จับเวลา" : `${paper.duration_minutes || 90} นาที`}
+                          </span>
+                        </div>
+                      </div>
+
+                      <Link
+                        to="/exam/$program/$subject/$year"
+                        params={{ program: program.id, subject: paper.subject, year: String(paper.year) }}
+                        className={`mt-6 w-full py-3.5 font-bold rounded-2xl active:translate-y-0.5 active:shadow-none transition-all flex items-center justify-center gap-2 text-xs sm:text-sm ${
+                          hasTaken
+                            ? "bg-slate-800 hover:bg-slate-900 text-white shadow-[0_4px_0_0_#0f172a]"
+                            : "bg-gradient-to-r from-teal-600 to-primary text-white shadow-[0_4px_0_0_#0f766e]"
+                        }`}
+                      >
+                        {hasTaken ? (
+                          <>
+                            <RotateCcw className="size-4" /> ฝึกทำข้อสอบอีกครั้ง
+                          </>
+                        ) : (
+                          <>
+                            <Play className="size-4 fill-white" /> เริ่มทำข้อสอบชุดนี้
+                          </>
+                        )}
+                      </Link>
+                    </div>
+                  );
+                })}
 
                 {papers.length === 0 && (
                   <div className="col-span-full backdrop-blur-md bg-white/40 border border-dashed border-slate-300 p-16 text-center text-slate-400 rounded-3xl">

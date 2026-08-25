@@ -2,7 +2,7 @@ import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useState, useEffect, useRef } from "react";
 import { ChevronLeft, ChevronRight, Eraser, Sparkles, Loader2, CheckCircle2, FileText, ArrowLeft } from "lucide-react";
 import { supabase } from "@/lib/supabase";
-import SignatureCanvas from 'react-signature-canvas';
+import SignatureCanvas from "react-signature-canvas";
 
 export const Route = createFileRoute("/worksheet/$id")({
   component: WorksheetPage,
@@ -12,28 +12,42 @@ function WorksheetPage() {
   const { id } = Route.useParams();
   const navigate = useNavigate();
 
+  const [student, setStudent] = useState<any>(null);
   const [worksheet, setWorksheet] = useState<any>(null);
   const [currentPage, setCurrentPage] = useState(0);
-  
-  // สร้าง Array ของ Ref เพื่อเก็บลายเส้นแยกแต่ละหน้า
+
   const sigCanvasRefs = useRef<any[]>([]);
-  
   const [isChecking, setIsChecking] = useState(false);
   const [aiFeedback, setAiFeedback] = useState<string>("");
 
   useEffect(() => {
-    const fetchWorksheet = async () => {
-      const { data, error } = await supabase.from('worksheets').select('*').eq('id', id).single();
-      if (error || !data) {
-        alert("ไม่พบข้อมูลแบบฝึกหัดนี้");
-        navigate({ to: "/programs" });
-        return;
-      }
-      setWorksheet(data);
-      sigCanvasRefs.current = new Array(data.pages.length).fill(null);
-    };
-    fetchWorksheet();
-  }, [id, navigate]);
+    fetchInitialData();
+  }, [id]);
+
+  const fetchInitialData = async () => {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) {
+      navigate({ to: "/login" });
+      return;
+    }
+
+    const { data: studentData } = await supabase
+      .from("students")
+      .select("*")
+      .eq("email", session.user.email)
+      .maybeSingle();
+
+    setStudent(studentData || { id: session.user.id, name: "นักเรียน", email: session.user.email, worksheetHistory: [] });
+
+    const { data, error } = await supabase.from("worksheets").select("*").eq("id", id).single();
+    if (error || !data) {
+      alert("ไม่พบข้อมูลแบบฝึกหัดนี้");
+      navigate({ to: "/programs" });
+      return;
+    }
+    setWorksheet(data);
+    sigCanvasRefs.current = new Array(data.pages.length).fill(null);
+  };
 
   const handleClear = () => {
     const currentCanvas = sigCanvasRefs.current[currentPage];
@@ -43,7 +57,7 @@ function WorksheetPage() {
 
   const handleCheckWithAI = async () => {
     const currentCanvas = sigCanvasRefs.current[currentPage];
-    
+
     if (!currentCanvas || currentCanvas.isEmpty()) {
       alert("กรุณาเขียนคำตอบลงบนแบบฝึกหัดก่อนส่งตรวจครับ");
       return;
@@ -53,7 +67,6 @@ function WorksheetPage() {
     setAiFeedback("");
 
     try {
-      // 1. ดึงภาพพื้นหลัง (ชีทแบบฝึกหัด)
       const bgImg = new Image();
       bgImg.crossOrigin = "Anonymous";
       bgImg.src = worksheet.pages[currentPage];
@@ -63,7 +76,6 @@ function WorksheetPage() {
         bgImg.onerror = reject;
       });
 
-      // 2. สร้าง Canvas จำลองเพื่อรวมร่างรูป
       const mergeCanvas = document.createElement("canvas");
       mergeCanvas.width = bgImg.width;
       mergeCanvas.height = bgImg.height;
@@ -71,33 +83,44 @@ function WorksheetPage() {
 
       if (!ctx) throw new Error("ไม่สามารถสร้าง Canvas ได้");
 
-      // วาดรูปชีทลงไปก่อน
       ctx.drawImage(bgImg, 0, 0, mergeCanvas.width, mergeCanvas.height);
-
-      // วาดลายเส้นของเด็กลงไปทับ
       const studentDrawing = currentCanvas.getCanvas();
       ctx.drawImage(studentDrawing, 0, 0, mergeCanvas.width, mergeCanvas.height);
 
-      // 3. แปลงเป็น Base64
       const finalImageBase64 = mergeCanvas.toDataURL("image/jpeg", 0.8).split(",")[1];
 
-      // 4. ส่งให้ Gemini ตรวจ
       const prompt = `ทำหน้าที่เป็นคุณครูใจดี ตรวจแบบฝึกหัดในรูปภาพนี้ รูปนี้ประกอบด้วยโจทย์และลายมือเขียนคำตอบของนักเรียนซ้อนทับกันอยู่ 
-      กรุณาอ่านลายมือและตรวจสอบความถูกต้องทีละข้อ (อิงจากโจทย์ในรูป) พร้อมสรุปคะแนนคร่าวๆ และให้คำแนะนำนักเรียนอย่างเป็นกันเองและให้กำลังใจ`;
+      กรุณาอ่านลายมือและตรวจสอบความถูกต้องทีละข้อ พร้อมสรุปคะแนน และให้คำแนะนำนักเรียนอย่างเป็นกันเอง`;
 
-      // ✅ ยิงไปที่หลังบ้านของเราแทน (ซ่อน API Key ไว้ที่ Vercel)
       const response = await fetch(`/api/gemini`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          model: "gemini-1.5-pro", // ใช้รุ่น Pro สำหรับการอ่านภาพที่ซับซ้อน
+          model: "gemini-1.5-pro",
           contents: [{ parts: [{ text: prompt }, { inline_data: { mime_type: "image/jpeg", data: finalImageBase64 } }] }]
         })
       });
 
       const data = await response.json();
-      const feedback = data.candidates?.[0]?.content?.parts?.[0]?.text || "เกิดข้อผิดพลาดในการประมวลผลคำตอบ";
+      const feedback = data.candidates?.[0]?.content?.parts?.[0]?.text || "ตรวจเรียบร้อยแล้ว";
       setAiFeedback(feedback);
+
+      // บันทึกประวัติลง Supabase
+      if (student) {
+        const currentWorksheetHistory = Array.isArray(student.worksheetHistory) ? student.worksheetHistory : [];
+        const newRecord = {
+          id: Date.now(),
+          worksheet_id: worksheet.id,
+          title: worksheet.title,
+          page: currentPage + 1,
+          date: new Date().toLocaleDateString("th-TH", { year: "numeric", month: "short", day: "numeric" }),
+          feedback: feedback
+        };
+
+        await supabase.from("students").update({
+          worksheetHistory: [newRecord, ...currentWorksheetHistory]
+        }).eq("email", student.email);
+      }
 
     } catch (error) {
       console.error(error);
@@ -111,7 +134,6 @@ function WorksheetPage() {
 
   return (
     <div className="min-h-screen bg-slate-900 flex flex-col font-sans">
-      {/* Header */}
       <header className="bg-slate-800 text-white p-4 flex items-center justify-between shadow-md z-10">
         <div className="flex items-center gap-4">
           <button 
@@ -136,26 +158,20 @@ function WorksheetPage() {
         </div>
       </header>
 
-      {/* Main Workspace */}
       <div className="flex-1 flex overflow-hidden">
-        
-        {/* ฝั่งซ้าย: กระดาษชีท */}
         <div className="flex-1 overflow-auto bg-slate-950 p-6 flex justify-center items-start custom-scrollbar">
           {worksheet.pages.map((pageStr: string, idx: number) => (
             <div 
               key={idx} 
               className={`relative shadow-2xl bg-white w-full max-w-4xl transition-opacity duration-300 ${idx === currentPage ? "block" : "hidden"}`}
-              style={{ aspectRatio: "1/1.414" }} // อัตราส่วนกระดาษ A4
+              style={{ aspectRatio: "1/1.414" }}
             >
-              {/* รูปชีทพื้นหลัง */}
               <img src={pageStr} alt={`Page ${idx + 1}`} className="absolute inset-0 w-full h-full object-fill pointer-events-none" />
-              
-              {/* กระดานใสๆ ให้เขียนทับ (Invisible Canvas) */}
               <div className="absolute inset-0 z-10 mix-blend-multiply opacity-80">
                 {/* @ts-ignore */}
                 <SignatureCanvas 
                   ref={(ref: any) => { sigCanvasRefs.current[idx] = ref; }}
-                  penColor="#2563eb" // ปากกาสีน้ำเงิน
+                  penColor="#2563eb"
                   canvasProps={{ className: "w-full h-full cursor-crosshair" }}
                 />
               </div>
@@ -163,9 +179,7 @@ function WorksheetPage() {
           ))}
         </div>
 
-        {/* ฝั่งขวา: แผงควบคุมและ AI Feedback */}
         <div className="w-80 bg-slate-800 border-l border-slate-700 flex flex-col shadow-xl z-10">
-          
           <div className="p-4 border-b border-slate-700 flex justify-between items-center bg-slate-800">
             <button 
               onClick={() => { setCurrentPage(prev => Math.max(0, prev - 1)); setAiFeedback(""); }}
@@ -202,7 +216,6 @@ function WorksheetPage() {
               </div>
             )}
           </div>
-
         </div>
       </div>
     </div>

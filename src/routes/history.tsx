@@ -1,10 +1,11 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { supabase } from "@/lib/supabase";
 import { PageShell } from "@/components/PageShell";
 import { 
   History, BookOpen, ChevronLeft, Loader2, Calendar, 
-  CheckCircle2, XCircle, Lightbulb, X, Flame, FileSearch, FilePenLine, Video, RefreshCw
+  CheckCircle2, XCircle, Lightbulb, X, Flame, FileSearch, FilePenLine, Video, RefreshCw,
+  Check, Filter, Award, Download, Printer, ExternalLink, Sparkles
 } from "lucide-react";
 
 export const Route = createFileRoute("/history")({
@@ -22,7 +23,16 @@ function HistoryPage() {
   const [retryAnswer, setRetryAnswer] = useState<any>("");
   const [retryStatus, setRetryStatus] = useState<"idle" | "correct" | "wrong">("idle");
   const [localMistakes, setLocalMistakes] = useState<any[]>([]);
+
+  // State สำหรับ Modal ดูเฉลยละเอียดทุกข้อ
   const [viewingHistory, setViewingHistory] = useState<any>(null);
+  const [fullExamQuestions, setFullExamQuestions] = useState<any[]>([]);
+  const [isLoadingFullExam, setIsLoadingFullExam] = useState(false);
+  const [reviewFilter, setReviewFilter] = useState<"all" | "correct" | "wrong">("all");
+
+  // State สำหรับ Modal เกียรติบัตร
+  const [certRecord, setCertRecord] = useState<any>(null);
+  const certRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     fetchStudentData();
@@ -40,7 +50,7 @@ function HistoryPage() {
       if (error) throw error;
       
       if (!data) {
-        setStudent({ name: "นักเรียน", examHistory: [] });
+        setStudent({ name: "นักเรียน", examHistory: [], worksheetHistory: [], lessonHistory: [] });
       } else {
         setStudent(data);
         const extractedMistakes: any[] = [];
@@ -54,6 +64,35 @@ function HistoryPage() {
     } finally {
       setIsLoading(false);
     }
+  };
+
+  const handleOpenReviewModal = async (record: any) => {
+    setViewingHistory(record);
+    setReviewFilter("all");
+    setIsLoadingFullExam(true);
+
+    try {
+      const { data: examData } = await supabase
+        .from('exams')
+        .select('questions')
+        .eq('id', record.exam_id)
+        .maybeSingle();
+
+      if (examData && Array.isArray(examData.questions) && examData.questions.length > 0) {
+        setFullExamQuestions(examData.questions);
+      } else {
+        setFullExamQuestions((record.mistakes || []).map((m: any) => m.question_data || m));
+      }
+    } catch (err) {
+      console.error("Failed to load full exam questions:", err);
+      setFullExamQuestions((record.mistakes || []).map((m: any) => m.question_data || m));
+    } finally {
+      setIsLoadingFullExam(false);
+    }
+  };
+
+  const handlePrintCertificate = () => {
+    window.print();
   };
 
   if (isLoading) {
@@ -70,6 +109,8 @@ function HistoryPage() {
   if (!student) return null;
 
   const history = Array.isArray(student.examHistory) ? student.examHistory : [];
+  const worksheets = Array.isArray(student.worksheetHistory) ? student.worksheetHistory : [];
+  const lessons = Array.isArray(student.lessonHistory) ? student.lessonHistory : [];
   const mistakes = localMistakes;
 
   const handleOpenRetry = (item: any) => {
@@ -112,8 +153,8 @@ function HistoryPage() {
         </nav>
 
         <div className="space-y-2 mb-8">
-          <h1 className="text-3xl sm:text-4xl font-black text-slate-900 tracking-tight">ประวัติการสอบ & แบบฝึกหัด</h1>
-          <p className="text-sm text-slate-500">ตรวจสอบประวัติการทำแบบทดสอบ แบบฝึกหัด และทบทวนข้อที่ทำพลาด</p>
+          <h1 className="text-3xl sm:text-4xl font-black text-slate-900 tracking-tight">ประวัติการสอบ & บทเรียน</h1>
+          <p className="text-sm text-slate-500">ตรวจสอบประวัติการทำแบบทดสอบ แบบฝึกหัด บทเรียนที่เข้าชม และดาวน์โหลดเกียรติบัตร</p>
         </div>
 
         {/* Interactive Tabs */}
@@ -140,7 +181,7 @@ function HistoryPage() {
               activeTab === "worksheets" ? "bg-primary text-white shadow-md" : "text-slate-500 hover:text-slate-800"
             }`}
           >
-            <FilePenLine className="size-4" /> ประวัติทำแบบฝึกหัด
+            <FilePenLine className="size-4" /> ประวัติทำแบบฝึกหัด ({worksheets.length})
           </button>
           <button
             onClick={() => setActiveTab("lessons")}
@@ -148,7 +189,7 @@ function HistoryPage() {
               activeTab === "lessons" ? "bg-indigo-600 text-white shadow-md" : "text-slate-500 hover:text-slate-800"
             }`}
           >
-            <Video className="size-4" /> ประวัติเข้าเรียน
+            <Video className="size-4" /> ประวัติเข้าเรียน ({lessons.length})
           </button>
         </div>
 
@@ -161,6 +202,7 @@ function HistoryPage() {
                   {[...history].reverse().map((record: any, idx: number) => {
                     const recordTotal = record.total || 1;
                     const percent = Math.round((record.score / recordTotal) * 100);
+                    const isPassed = percent >= 70;
                     
                     return (
                       <div key={idx} className="flex flex-col p-5 rounded-2xl border border-slate-100 bg-white hover:border-primary/40 hover:shadow-md transition-all gap-4">
@@ -192,12 +234,23 @@ function HistoryPage() {
                           </div>
                         </div>
 
-                        <button 
-                          onClick={() => setViewingHistory(record)}
-                          className="mt-1 w-full py-2.5 bg-slate-800 hover:bg-slate-900 text-white text-xs font-bold rounded-xl transition-colors flex items-center justify-center gap-2 shadow-sm"
-                        >
-                          <FileSearch className="size-4" /> ดูเฉลยข้อที่ทำผิด
-                        </button>
+                        <div className="flex flex-col gap-2 mt-1">
+                          <button 
+                            onClick={() => handleOpenReviewModal(record)}
+                            className="w-full py-2.5 bg-slate-800 hover:bg-slate-900 text-white text-xs font-bold rounded-xl transition-colors flex items-center justify-center gap-2 shadow-sm"
+                          >
+                            <FileSearch className="size-4" /> ดูเฉลยและช้อยส์ทุกข้อ
+                          </button>
+
+                          {isPassed && (
+                            <button
+                              onClick={() => setCertRecord(record)}
+                              className="w-full py-2 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-white text-xs font-bold rounded-xl transition-all flex items-center justify-center gap-1.5 shadow-sm"
+                            >
+                              <Award className="size-4" /> รับเกียรติบัตร (ผ่านเกณฑ์)
+                            </button>
+                          )}
+                        </div>
                       </div>
                     );
                   })}
@@ -248,84 +301,360 @@ function HistoryPage() {
           </div>
         )}
 
-        {/* TAB 3 & 4 */}
-        {(activeTab === "worksheets" || activeTab === "lessons") && (
+        {/* TAB 3: WORKSHEETS */}
+        {activeTab === "worksheets" && (
           <div className="backdrop-blur-xl bg-white/80 border border-white/80 rounded-3xl shadow-[0_10px_35px_rgba(0,0,0,0.04)] overflow-hidden animate-in fade-in duration-300">
-            <div className="py-24 px-6 text-center text-slate-400 space-y-3">
-              {activeTab === "worksheets" ? <FilePenLine className="size-16 mx-auto opacity-20 text-primary" /> : <Video className="size-16 mx-auto opacity-20 text-indigo-600" />}
-              <p className="font-black text-xl text-slate-700">กำลังพัฒนาระบบบันทึกประวัติส่วนนี้ 🚧</p>
-              <p className="text-sm font-medium">เร็วๆ นี้คุณจะสามารถติดตามประวัติการ{activeTab === "worksheets" ? "ทำแบบฝึกหัด" : "เข้าเรียนวิดีโอ"}ได้ที่นี่!</p>
+            <div className="p-6 sm:p-8">
+              {worksheets.length > 0 ? (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {worksheets.map((w: any, idx: number) => (
+                    <div key={idx} className="p-5 rounded-2xl border border-slate-100 bg-white hover:border-primary/40 hover:shadow-md transition-all flex flex-col justify-between gap-4">
+                      <div>
+                        <div className="flex items-center justify-between mb-2">
+                          <span className="text-[10px] font-bold bg-primary/10 text-primary px-2.5 py-0.5 rounded-lg">หน้าที่ {w.page}</span>
+                          <span className="text-xs text-slate-400 flex items-center gap-1"><Calendar className="size-3.5"/> {w.date}</span>
+                        </div>
+                        <h3 className="font-bold text-base text-slate-800">{w.title}</h3>
+                        <div className="mt-3 p-3 bg-slate-50 rounded-xl text-xs text-slate-600 line-clamp-3">
+                          {w.feedback}
+                        </div>
+                      </div>
+                      <Link 
+                        to={`/worksheet/${w.worksheet_id}` as any}
+                        className="w-full py-2 bg-slate-800 hover:bg-slate-900 text-white text-xs font-bold rounded-xl text-center transition-colors"
+                      >
+                        กลับไปทำแบบฝึกหัดหน้านี้
+                      </Link>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="py-20 text-center text-slate-400 space-y-3 bg-slate-50/50 rounded-2xl border border-dashed border-slate-200">
+                  <FilePenLine className="size-12 mx-auto opacity-20" />
+                  <p className="font-semibold text-sm">ยังไม่มีประวัติการส่งแบบฝึกหัด</p>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* TAB 4: LESSONS (ปลดล็อกสมบูรณ์แล้ว) */}
+        {activeTab === "lessons" && (
+          <div className="backdrop-blur-xl bg-white/80 border border-white/80 rounded-3xl shadow-[0_10px_35px_rgba(0,0,0,0.04)] overflow-hidden animate-in fade-in duration-300">
+            <div className="p-6 sm:p-8">
+              {lessons.length > 0 ? (
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {lessons.map((lesson: any, idx: number) => (
+                    <div key={idx} className="p-5 rounded-2xl border border-slate-100 bg-white hover:border-indigo-300 hover:shadow-md transition-all flex flex-col justify-between gap-4">
+                      <div>
+                        <div className="flex items-center justify-between mb-2">
+                          <span className="text-[10px] font-bold bg-indigo-50 text-indigo-700 px-2.5 py-0.5 rounded-lg border border-indigo-100">
+                            {lesson.subject || "บทเรียน"}
+                          </span>
+                          <span className="text-xs text-slate-400 flex items-center gap-1">
+                            <Calendar className="size-3.5"/> {lesson.date}
+                          </span>
+                        </div>
+                        <h3 className="font-bold text-base text-slate-800 leading-snug">{lesson.title}</h3>
+                        <p className="text-xs text-slate-400 mt-1">แผนการเรียน: {lesson.program || "ทั่วไป"}</p>
+                      </div>
+
+                      <Link 
+                        to="/hub/$program"
+                        params={{ program: (lesson.program || "ism").toLowerCase() }}
+                        className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-xl transition-all flex items-center justify-center gap-1.5 shadow-sm mt-auto"
+                      >
+                        <Video className="size-4" /> ดูบทเรียนนี้ซ้ำ
+                      </Link>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="py-20 text-center text-slate-400 space-y-3 bg-slate-50/50 rounded-2xl border border-dashed border-slate-200">
+                  <Video className="size-12 mx-auto opacity-20 text-indigo-600" />
+                  <p className="font-semibold text-sm">ยังไม่มีประวัติการเข้าเรียนวิดีโอ</p>
+                  <p className="text-xs">เมื่อคุณกดดูคลิปการสอนในหน้าศูนย์การเรียนรู้ ระบบจะบันทึกประวัติให้ที่นี่อัตโนมัติครับ</p>
+                </div>
+              )}
             </div>
           </div>
         )}
       </div>
 
-      {/* Modal: ดูเฉลยข้อสอบ */}
+      {/* ✅ Modal: ดูเฉลยข้อสอบแบบครบเครื่อง */}
       {viewingHistory && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/70 backdrop-blur-sm p-4 sm:p-6 animate-in fade-in duration-200">
-          <div className="bg-white w-full max-w-4xl max-h-[90vh] rounded-[2rem] shadow-2xl flex flex-col overflow-hidden animate-in zoom-in-95">
-            <div className="p-5 sm:p-6 border-b border-slate-100 flex items-center justify-between bg-slate-50">
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/80 backdrop-blur-md p-4 sm:p-6 animate-in fade-in duration-200">
+          <div className="bg-white w-full max-w-4xl max-h-[92vh] rounded-[2.5rem] shadow-2xl flex flex-col overflow-hidden animate-in zoom-in-95">
+            <div className="p-6 border-b border-slate-100 flex flex-col sm:flex-row items-start sm:items-center justify-between bg-slate-50/90 gap-4">
               <div>
-                <h3 className="font-black text-lg text-slate-800 flex items-center gap-2">
-                  <BookOpen className="size-5 text-primary" /> ทบทวนเฉลย (ข้อที่ทำผิด)
+                <h3 className="font-black text-xl text-slate-800 flex items-center gap-2">
+                  <BookOpen className="size-6 text-primary" /> ทบทวนเฉลยข้อสอบ
                 </h3>
-                <p className="text-sm font-semibold text-slate-500 mt-1">{viewingHistory.title}</p>
-                <div className="text-xs text-slate-400 mt-1 flex gap-3">
-                  <span>คะแนน: {viewingHistory.score}/{viewingHistory.total}</span>
-                  <span>วันที่: {viewingHistory.date}</span>
+                <p className="text-sm font-bold text-slate-600 mt-0.5">{viewingHistory.title}</p>
+                <div className="text-xs text-slate-400 mt-1 flex gap-4 font-semibold">
+                  <span className="text-emerald-700 font-bold bg-emerald-100/60 px-2 py-0.5 rounded-md">คะแนน: {viewingHistory.score} / {viewingHistory.total}</span>
+                  <span>วันที่สอบ: {viewingHistory.date}</span>
                 </div>
               </div>
-              <button onClick={() => setViewingHistory(null)} className="p-2.5 bg-white border border-slate-200 rounded-full text-slate-400 hover:text-slate-700 transition shadow-sm">
+
+              <div className="flex items-center gap-2">
+                <div className="flex bg-slate-200/70 p-1 rounded-xl text-xs font-bold">
+                  <button
+                    onClick={() => setReviewFilter("all")}
+                    className={`px-3 py-1.5 rounded-lg transition-all ${reviewFilter === "all" ? "bg-white text-slate-800 shadow-sm" : "text-slate-500 hover:text-slate-700"}`}
+                  >
+                    ทั้งหมด
+                  </button>
+                  <button
+                    onClick={() => setReviewFilter("correct")}
+                    className={`px-3 py-1.5 rounded-lg transition-all ${reviewFilter === "correct" ? "bg-emerald-600 text-white shadow-sm" : "text-slate-500 hover:text-slate-700"}`}
+                  >
+                    ถูก (✓)
+                  </button>
+                  <button
+                    onClick={() => setReviewFilter("wrong")}
+                    className={`px-3 py-1.5 rounded-lg transition-all ${reviewFilter === "wrong" ? "bg-rose-600 text-white shadow-md" : "text-slate-500 hover:text-slate-700"}`}
+                  >
+                    ผิด (✗)
+                  </button>
+                </div>
+
+                <button onClick={() => setViewingHistory(null)} className="p-2.5 bg-white border border-slate-200 rounded-full text-slate-400 hover:text-slate-700 transition shadow-sm">
+                  <X className="size-5"/>
+                </button>
+              </div>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-6 sm:p-8 custom-scrollbar bg-slate-100/50 space-y-6">
+              {isLoadingFullExam ? (
+                <div className="py-24 text-center text-slate-400 space-y-3">
+                  <Loader2 className="size-8 animate-spin text-primary mx-auto" />
+                  <p className="text-sm font-bold">กำลังดึงชุดข้อสอบและตัวเลือกทั้งหมด...</p>
+                </div>
+              ) : fullExamQuestions.length > 0 ? (
+                fullExamQuestions
+                  .map((q: any, idx: number) => {
+                    const mistakeItem = (viewingHistory.mistakes || []).find((m: any) => m.qIndex === idx);
+                    const isWrong = !!mistakeItem;
+                    const isCorrect = !isWrong;
+                    const userGivenAnswer = mistakeItem ? mistakeItem.userAnswer : undefined;
+
+                    return {
+                      qIndex: idx,
+                      question: q.question,
+                      type: q.type || "choice",
+                      options: q.options || [],
+                      correct_index: q.correct_index,
+                      subjective_answers: q.subjective_answers || [],
+                      explanation: q.explanation || mistakeItem?.explanation,
+                      image_url: q.image_url,
+                      isCorrect,
+                      userGivenAnswer
+                    };
+                  })
+                  .filter((item: any) => {
+                    if (reviewFilter === "correct") return item.isCorrect;
+                    if (reviewFilter === "wrong") return !item.isCorrect;
+                    return true;
+                  })
+                  .map((item: any) => {
+                    const hasImage = item.image_url && item.image_url !== "NEEDS_IMAGE";
+
+                    return (
+                      <div 
+                        key={item.qIndex} 
+                        className={`bg-white p-6 sm:p-8 rounded-3xl border shadow-sm space-y-5 transition-all ${
+                          item.isCorrect ? "border-emerald-200 bg-white" : "border-rose-200 bg-rose-50/20"
+                        }`}
+                      >
+                        <div className="flex gap-4 items-start justify-between pb-4 border-b border-slate-100">
+                          <div className="space-y-2 flex-1">
+                            <div className="flex items-center gap-2">
+                              <span className="text-xs font-black bg-slate-800 text-white px-3 py-1 rounded-lg">
+                                ข้อที่ {item.qIndex + 1}
+                              </span>
+                              <span className="text-[11px] font-bold text-slate-500 bg-slate-100 px-2.5 py-0.5 rounded-md border">
+                                {item.type === "subjective" ? "อัตนัย" : "ปรนัย"}
+                              </span>
+                            </div>
+                            <p className="font-bold text-slate-800 text-base sm:text-lg leading-relaxed whitespace-pre-line">
+                              {item.question}
+                            </p>
+                          </div>
+
+                          <span className={`shrink-0 px-3.5 py-1.5 text-xs font-black rounded-xl flex items-center gap-1.5 ${
+                            item.isCorrect ? "bg-emerald-100 text-emerald-800" : "bg-rose-100 text-rose-700"
+                          }`}>
+                            {item.isCorrect ? <Check className="size-4 text-emerald-600"/> : <XCircle className="size-4 text-rose-600"/>}
+                            {item.isCorrect ? "ถูกต้อง" : "ตอบผิด"}
+                          </span>
+                        </div>
+
+                        {hasImage && (
+                          <div className="flex justify-center bg-slate-50 p-4 rounded-2xl border border-slate-100 w-fit mx-auto shadow-inner">
+                            <img src={item.image_url} alt="Question Graphic" className="max-h-60 rounded-xl object-contain" />
+                          </div>
+                        )}
+
+                        {item.type === "choice" ? (
+                          <div className="space-y-2.5 pt-2">
+                            <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">ตัวเลือกทั้งหมด:</p>
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                              {item.options.map((opt: string, optIdx: number) => {
+                                const isCorrectChoice = optIdx === item.correct_index;
+                                const isUserChoice = item.userGivenAnswer === optIdx;
+
+                                let choiceContainerStyle = "border-slate-200 bg-slate-50/60 text-slate-700";
+                                let badgeStyle = "bg-slate-200 text-slate-700";
+
+                                if (isCorrectChoice) {
+                                  choiceContainerStyle = "border-emerald-400 bg-emerald-50/90 text-emerald-950 font-bold ring-1 ring-emerald-400 shadow-sm";
+                                  badgeStyle = "bg-emerald-600 text-white";
+                                } else if (isUserChoice && !item.isCorrect) {
+                                  choiceContainerStyle = "border-rose-400 bg-rose-50 text-rose-950 font-bold ring-1 ring-rose-400";
+                                  badgeStyle = "bg-rose-600 text-white";
+                                }
+
+                                return (
+                                  <div 
+                                    key={optIdx} 
+                                    className={`p-3.5 rounded-2xl border text-sm flex items-center justify-between gap-3 transition-all ${choiceContainerStyle}`}
+                                  >
+                                    <div className="flex items-center gap-3">
+                                      <span className={`size-7 rounded-xl flex items-center justify-center text-xs font-black shrink-0 ${badgeStyle}`}>
+                                        {choiceLabels[optIdx] || optIdx + 1}
+                                      </span>
+                                      <span className="leading-relaxed">{opt}</span>
+                                    </div>
+
+                                    {isCorrectChoice && (
+                                      <span className="text-[10px] font-black uppercase text-emerald-700 bg-emerald-200/80 px-2 py-0.5 rounded-md shrink-0">
+                                        ✓ เฉลยที่ถูก
+                                      </span>
+                                    )}
+                                    {isUserChoice && !item.isCorrect && (
+                                      <span className="text-[10px] font-black uppercase text-rose-700 bg-rose-200/80 px-2 py-0.5 rounded-md shrink-0">
+                                        ✗ คุณเลือกข้อนี้
+                                      </span>
+                                    )}
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2">
+                            {!item.isCorrect && (
+                              <div className="bg-rose-50 border border-rose-200 p-4 rounded-2xl text-rose-900">
+                                <p className="text-xs font-bold opacity-60 uppercase mb-1">คำตอบที่คุณพิมพ์:</p>
+                                <p className="text-base font-black">{item.userGivenAnswer || "ไม่ได้ตอบ"}</p>
+                              </div>
+                            )}
+                            <div className="bg-emerald-50 border border-emerald-200 p-4 rounded-2xl text-emerald-900">
+                              <p className="text-xs font-bold opacity-60 uppercase mb-1">คำตอบที่ถูกต้อง:</p>
+                              <p className="text-base font-black">{(item.subjective_answers || []).join(" หรือ ")}</p>
+                            </div>
+                          </div>
+                        )}
+
+                        {item.explanation && item.explanation !== "ไม่มีคำอธิบายเพิ่มเติม" && (
+                          <div className="p-5 sm:p-6 bg-slate-50 rounded-2xl border border-slate-200 text-sm sm:text-base text-slate-700 space-y-2 mt-4">
+                            <p className="font-bold text-primary flex items-center gap-2 text-base">
+                              <Lightbulb className="size-5 text-amber-500"/> วิธีทำอย่างละเอียด:
+                            </p>
+                            <p className="whitespace-pre-line leading-relaxed text-slate-600 pl-7">{item.explanation}</p>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })
+              ) : (
+                <div className="text-center py-20 bg-white rounded-3xl border border-dashed text-slate-400">
+                  <p className="text-base font-bold">ไม่พบข้อมูลข้อสอบ</p>
+                </div>
+              )}
+            </div>
+
+          </div>
+        </div>
+      )}
+
+      {/* ✅ Modal: เกียรติบัตรรับรองผลสอบ */}
+      {certRecord && (
+        <div className="fixed inset-0 z-[110] flex items-center justify-center bg-slate-950/80 backdrop-blur-md p-4 animate-in fade-in duration-200">
+          <div className="bg-white w-full max-w-3xl rounded-[2.5rem] shadow-2xl flex flex-col overflow-hidden animate-in zoom-in-95">
+            
+            <div className="p-4 border-b border-slate-100 flex items-center justify-between bg-slate-50">
+              <div className="flex items-center gap-2">
+                <Award className="size-5 text-amber-600" />
+                <span className="font-bold text-sm text-slate-800">เกียรติบัตรรับรองผลการสอบ</span>
+              </div>
+              <button onClick={() => setCertRecord(null)} className="p-2 text-slate-400 hover:text-slate-700 rounded-full">
                 <X className="size-5"/>
               </button>
             </div>
 
-            <div className="flex-1 overflow-y-auto p-4 sm:p-6 custom-scrollbar bg-slate-100/50 space-y-6">
-              {viewingHistory.mistakes && viewingHistory.mistakes.length > 0 ? (
-                viewingHistory.mistakes.map((m: any, idx: number) => (
-                  <div key={idx} className="bg-white p-5 sm:p-6 rounded-2xl border border-rose-100 shadow-sm">
-                    <div className="flex gap-3 items-start justify-between mb-4 pb-4 border-b border-slate-100">
-                      <p className="font-bold text-slate-800 text-base leading-relaxed">
-                        ข้อที่ {m.qIndex + 1}. {m.question}
-                      </p>
-                      <span className="shrink-0 px-3 py-1 bg-rose-100 text-rose-700 text-xs font-bold rounded-lg flex items-center gap-1">
-                        <XCircle className="size-3.5"/> ตอบผิด
-                      </span>
-                    </div>
+            {/* ใบประกาศนียบัตร */}
+            <div className="p-8 sm:p-12 overflow-y-auto flex justify-center bg-slate-100/50">
+              <div 
+                ref={certRef}
+                className="w-full max-w-2xl bg-gradient-to-br from-amber-50/60 via-white to-amber-50/40 p-8 sm:p-12 rounded-3xl border-8 border-double border-amber-300 shadow-xl text-center relative overflow-hidden"
+              >
+                <div className="absolute top-0 right-0 size-32 bg-amber-200/30 rounded-full blur-2xl pointer-events-none" />
+                <div className="absolute bottom-0 left-0 size-32 bg-teal-200/30 rounded-full blur-2xl pointer-events-none" />
 
-                    {m.question_data?.image_url && m.question_data.image_url !== "NEEDS_IMAGE" && (
-                       <div className="mb-5 flex justify-center bg-slate-50 p-2 rounded-xl border w-fit">
-                         <img src={m.question_data.image_url} alt="Question" className="max-h-48 rounded-lg object-contain" />
-                       </div>
-                    )}
-
-                    <div className="bg-emerald-50 border border-emerald-100 p-4 rounded-xl mb-4">
-                      <p className="text-xs font-bold text-emerald-800 mb-1.5 uppercase tracking-wider opacity-80">คำตอบที่ถูกต้อง:</p>
-                      <p className="text-base font-black text-emerald-900">
-                        {m.question_data?.type === "choice" 
-                          ? m.question_data.options[m.question_data.correct_index] 
-                          : (m.question_data?.subjective_answers || []).join(" หรือ ")}
-                      </p>
-                    </div>
-
-                    {m.explanation && m.explanation !== "ไม่มีคำอธิบายเพิ่มเติม" && (
-                       <div className="p-5 bg-slate-50 rounded-xl border border-slate-200 text-sm text-slate-700">
-                         <p className="font-bold text-primary flex items-center gap-1.5 mb-3 text-base">
-                           <Lightbulb className="size-4"/> คำอธิบาย / วิธีทำ:
-                         </p>
-                         <p className="whitespace-pre-line leading-loose">{m.explanation}</p>
-                       </div>
-                    )}
-                  </div>
-                ))
-              ) : (
-                <div className="text-center flex flex-col items-center justify-center py-16 bg-white rounded-2xl border border-dashed border-emerald-200">
-                  <CheckCircle2 className="size-20 text-emerald-500 mb-4 opacity-90" />
-                  <p className="text-xl font-black text-emerald-800 mb-1">ยอดเยี่ยมมาก!</p>
-                  <p className="text-sm font-semibold text-emerald-600">ข้อสอบชุดนี้คุณทำคะแนนได้เต็ม ไม่มีข้อผิดให้ทบทวนครับ 🎉</p>
+                <div className="flex justify-center mb-4">
+                  <span className="p-4 bg-amber-100 text-amber-600 rounded-full shadow-inner border border-amber-200">
+                    <Award className="size-12" />
+                  </span>
                 </div>
-              )}
+
+                <p className="text-xs font-extrabold uppercase tracking-widest text-amber-800/80">CERTIFICATE OF ACHIEVEMENT</p>
+                <h2 className="text-2xl sm:text-3xl font-black text-slate-800 mt-1 mb-6">เกียรติบัตรผ่านเกณฑ์มาตรฐาน</h2>
+
+                <p className="text-xs sm:text-sm text-slate-500 mb-2">ขอมอบเกียรติบัตรฉบับนี้เพื่อแสดงว่า</p>
+                <p className="text-xl sm:text-2xl font-black text-primary mb-6 underline decoration-amber-300 decoration-wavy underline-offset-8">
+                  {student.name || student.email}
+                </p>
+
+                <p className="text-xs sm:text-sm text-slate-600 max-w-md mx-auto leading-relaxed">
+                  ได้ผ่านการทดสอบวัดประเมินผลในชุดข้อสอบ <br />
+                  <span className="font-bold text-slate-800 text-sm sm:text-base">"{certRecord.title}"</span>
+                </p>
+
+                <div className="inline-flex items-center gap-6 my-6 bg-white/80 border border-amber-200/80 px-6 py-3 rounded-2xl shadow-sm">
+                  <div>
+                    <p className="text-[10px] font-bold text-slate-400 uppercase">คะแนนที่ได้</p>
+                    <p className="text-lg font-black text-emerald-600">{certRecord.score} / {certRecord.total}</p>
+                  </div>
+                  <div className="w-px h-8 bg-slate-200" />
+                  <div>
+                    <p className="text-[10px] font-bold text-slate-400 uppercase">คิดเป็น</p>
+                    <p className="text-lg font-black text-amber-600">{Math.round((certRecord.score / certRecord.total) * 100)}%</p>
+                  </div>
+                </div>
+
+                <p className="text-xs text-slate-400 mt-2">
+                  ให้ไว้ ณ วันที่ {certRecord.date || new Date().toLocaleDateString("th-TH")} • Exam Vault Thailand
+                </p>
+              </div>
             </div>
+
+            <div className="p-4 border-t border-slate-100 bg-white flex gap-3">
+              <button 
+                onClick={() => setCertRecord(null)}
+                className="flex-1 py-3 border border-slate-200 rounded-2xl text-xs font-bold text-slate-600 hover:bg-slate-50"
+              >
+                ปิดหน้าต่าง
+              </button>
+              <button 
+                onClick={handlePrintCertificate}
+                className="flex-1 py-3 bg-amber-500 hover:bg-amber-600 text-white rounded-2xl text-xs font-bold transition flex items-center justify-center gap-2 shadow-md"
+              >
+                <Printer className="size-4" /> พิมพ์ / บันทึก PDF
+              </button>
+            </div>
+
           </div>
         </div>
       )}
