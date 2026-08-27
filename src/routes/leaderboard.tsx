@@ -8,7 +8,6 @@ export const Route = createFileRoute("/leaderboard")({
   component: LeaderboardPage,
 });
 
-// ✅ เพิ่ม 2 วิชาใหม่เข้าไปเรียบร้อยครับ
 const SUBJECTS = [
   { id: "math", name: "คณิตศาสตร์", color: "text-blue-600", activeBg: "bg-blue-600 text-white" },
   { id: "science", name: "วิทยาศาสตร์", color: "text-emerald-600", activeBg: "bg-emerald-600 text-white" },
@@ -36,7 +35,6 @@ function LeaderboardPage() {
         setCurrentUserEmail(session.user.email || null);
       }
 
-      // 🚀 แก้ปัญหาโหลดช้า: ตัด examHistory ออก ดึงมาเฉพาะสิ่งที่จำเป็นในการจัดอันดับเท่านั้น
       const { data, error } = await supabase
         .from("students")
         .select("id, name, email, scores");
@@ -51,7 +49,6 @@ function LeaderboardPage() {
     }
   };
 
-  // ใช้ useMemo ป้องกันการคำนวณใหม่ถ้าข้อมูลไม่เปลี่ยน ช่วยให้คลิกเปลี่ยนวิชาได้ลื่นไหลขึ้น
   const rankedStudents = useMemo(() => {
     return students
       .map((s) => ({
@@ -104,7 +101,7 @@ function LeaderboardPage() {
           </div>
           <h1 className="text-3xl sm:text-5xl font-black text-slate-900 tracking-tight">Hall of Fame</h1>
           <p className="text-sm text-slate-500 leading-relaxed">
-            ตารางจัดอันดับนักเรียนที่มีผลคะแนนยอดเยี่ยมสูงสุดในแต่ละวิชา
+            ตารางจัดอันดับนักเรียนที่มีผลคะแนนยอดเยี่ยมสูงสุดในแต่ละวิชา (เฉพาะการสอบรอบแรก)
           </p>
         </div>
 
@@ -151,7 +148,7 @@ function LeaderboardPage() {
         {rankedStudents.length > 0 ? (
           <div className="max-w-3xl mx-auto space-y-6">
             <div className="grid grid-cols-3 gap-3 sm:gap-4 items-end pt-8 pb-4">
-              {/* Rank 2: Silver */}
+              {/* Rank 2 */}
               <div className="flex flex-col items-center">
                 {top2 ? (
                   <>
@@ -167,7 +164,7 @@ function LeaderboardPage() {
                 )}
               </div>
 
-              {/* Rank 1: Gold Champion */}
+              {/* Rank 1 */}
               <div className="flex flex-col items-center -translate-y-2">
                 {top1 ? (
                   <>
@@ -182,7 +179,7 @@ function LeaderboardPage() {
                 ) : null}
               </div>
 
-              {/* Rank 3: Bronze */}
+              {/* Rank 3 */}
               <div className="flex flex-col items-center">
                 {top3 ? (
                   <>
@@ -199,7 +196,7 @@ function LeaderboardPage() {
               </div>
             </div>
 
-            {/* Other Ranks Table */}
+            {/* Other Ranks */}
             {otherRanks.length > 0 && (
               <div className="backdrop-blur-xl bg-white/80 border border-white/90 rounded-3xl p-4 sm:p-6 shadow-[0_10px_35px_rgba(0,0,0,0.04)] space-y-2.5">
                 {otherRanks.map((student, idx) => {

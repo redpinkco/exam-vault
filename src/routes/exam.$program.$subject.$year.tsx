@@ -198,7 +198,6 @@ function ExamSessionPage() {
     return () => window.removeEventListener('beforeunload', handleBeforeUnload);
   }, [userAnswers, isSubmitted]);
 
-  // ✅ ปรับปรุง: เซฟเฉพาะคำตอบและดัชนีข้อลง LocalStorage (ไม่เก็บ questions ทั้งก้อนให้หนักเครื่อง)
   useEffect(() => {
     if (!examData || !student || isSubmitted) return;
     const storageKey = `exam_ans_${examData.id}_student_${student.id}`;
@@ -254,7 +253,6 @@ function ExamSessionPage() {
     });
   };
 
-  // ✅ ปรับปรุง: ดึงข้อมูลแบบแม่นยำและโหลดเร็วที่สุด
   const fetchSessionAndExam = async () => {
     try {
       const { data: { session } } = await supabase.auth.getSession();
@@ -268,7 +266,6 @@ function ExamSessionPage() {
       const decodedSubject = decodeURIComponent(subject);
       const dbProgramTarget = DB_PROGRAM_MAP[decodedProgram] || decodedProgram;
 
-      // รันดึงข้อมูลนักเรียนและข้อสอบพร้อมกันแบบ Parallel
       const [studentRes, examRes] = await Promise.all([
         supabase.from('students').select('id, name, email, examHistory, scores').eq('email', session.user.email).maybeSingle(),
         supabase.from('exams')
@@ -310,7 +307,6 @@ function ExamSessionPage() {
         setQuestions(baseQuestions);
       }
 
-      // ดึงคำตอบเดิมที่บันทึกไว้ในเครื่อง
       const storageKey = `exam_ans_${fetchedExam.id}_student_${currentStudent.id}`;
       const savedData = localStorage.getItem(storageKey);
 
@@ -447,6 +443,7 @@ function ExamSessionPage() {
 
       const isFirstAttempt = attemptCount === 1;
 
+      // บันทึกลง Leaderboard Submissions เฉพาะการทำรอบแรก
       if (isFirstAttempt) {
         await supabase.from('exam_submissions').insert([{
           exam_id: examData.id,
@@ -461,7 +458,6 @@ function ExamSessionPage() {
         }]);
       }
 
-      // ดึงสถิติคัดกรองเฉพาะตัวเลขคะแนน
       const { data: submissions } = await supabase
         .from('exam_submissions')
         .select('percentage')
@@ -526,18 +522,21 @@ function ExamSessionPage() {
 
       const updatedHistory = [...currentHistory, newHistoryRecord];
 
-      const currentScores = student.scores || { math: 0, english: 0, science: 0, thai: 0, social: 0 };
+      // อัปเดตตารางคะแนนเฉลี่ยเฉพาะรอบแรก
+      const currentScores = student.scores || { math: 0, english: 0, science: 0, thai: 0, social: 0, aptitude_math: 0, aptitude_eng: 0 };
       let subjectKey = "other";
-      if (examData.subject.includes("คณิต")) subjectKey = "math";
-      else if (examData.subject.includes("วิทย์")) subjectKey = "science";
-      else if (examData.subject.includes("อังกฤษ")) subjectKey = "english";
-      else if (examData.subject.includes("ไทย")) subjectKey = "thai";
+      if (examData.subject.includes("คณิตศาสตร์")) subjectKey = "math";
+      else if (examData.subject.includes("วิทยาศาสตร์")) subjectKey = "science";
+      else if (examData.subject.includes("ภาษาอังกฤษ")) subjectKey = "english";
+      else if (examData.subject.includes("ภาษาไทย")) subjectKey = "thai";
       else if (examData.subject.includes("สังคม")) subjectKey = "social";
+      else if (examData.subject.includes("ความถนัดทางคณิต")) subjectKey = "aptitude_math";
+      else if (examData.subject.includes("ทักษะภาษาอังกฤษ")) subjectKey = "aptitude_eng";
 
       const currentSubjectScore = currentScores[subjectKey] || 0;
       const updatedScores = { 
         ...currentScores, 
-        [subjectKey]: Math.max(currentSubjectScore, percentage) 
+        [subjectKey]: isFirstAttempt ? Math.max(currentSubjectScore, percentage) : currentSubjectScore 
       };
 
       if (typeof student.id === 'number') {
@@ -801,13 +800,13 @@ function ExamSessionPage() {
         </div>
       </div>
 
-      {/* ✅ POPUP RESULT */}
+      {/* POPUP RESULT */}
       {showResultModal && examResult && (
         <div 
           className="fixed inset-0 z-[100] flex flex-col lg:flex-row bg-slate-900/95 backdrop-blur-md overflow-hidden p-0 m-0"
           onWheel={handleWheel}
         >
-          {/* ⬅️ ซ้าย: แผงสรุปคะแนน */}
+          {/* ซ้าย: แผงสรุปคะแนน */}
           <div className="w-full lg:w-[400px] h-[35vh] lg:h-full bg-white flex flex-col shadow-[10px_0_30px_rgba(0,0,0,0.2)] shrink-0 overflow-y-auto custom-scrollbar z-50 rounded-b-3xl lg:rounded-none lg:rounded-r-3xl">
             <div className="p-6 sm:p-8 flex-1 flex flex-col">
               <div className="text-center pb-6 border-b border-slate-100">
@@ -816,7 +815,7 @@ function ExamSessionPage() {
                 <p className="text-sm font-medium text-slate-500 mt-1 line-clamp-2">{examData.title}</p>
                 {attemptCount > 1 && (
                   <span className="text-[10px] bg-amber-100 text-amber-800 font-bold px-3 py-1 rounded-full mt-3 inline-block border border-amber-200">
-                    รอบที่ {attemptCount} (สลับช้อยส์)
+                    รอบที่ {attemptCount} (ฝึกซ้ำ)
                   </span>
                 )}
               </div>
@@ -874,7 +873,7 @@ function ExamSessionPage() {
             </div>
           </div>
 
-          {/* ➡️ ขวา: Slider เฉลยข้อสอบ */}
+          {/* ขวา: Slider เฉลยข้อสอบ */}
           <div 
             className="flex-1 relative flex items-center justify-center h-[65vh] lg:h-full p-4 lg:p-10 select-none z-10"
             onMouseDown={handleDragStart}
@@ -1046,7 +1045,7 @@ function ExamSessionPage() {
         </div>
       )}
 
-      {/* ✅ Modal: เกียรติบัตร */}
+      {/* Modal: เกียรติบัตร */}
       {showCertModal && (
         <div className="fixed inset-0 z-[110] flex items-center justify-center bg-slate-950/80 backdrop-blur-md p-4 animate-in fade-in duration-200">
           <div className="bg-white w-full max-w-3xl rounded-[2.5rem] shadow-2xl flex flex-col overflow-hidden animate-in zoom-in-95">

@@ -7,13 +7,14 @@ import {
   HeadContent,
   Scripts,
 } from "@tanstack/react-router";
-import { useEffect, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
+import { Download, X } from "lucide-react";
 
 import appCss from "../styles.css?url";
 import { reportLovableError } from "../lib/lovable-error-reporting";
 import { supabase } from "../lib/supabase";
 
-const APP_VERSION = "1.0.2"; 
+const APP_VERSION = "1.0.3"; 
 
 const ADMIN_EMAILS = [
   "ttanasak@gmail.com"
@@ -142,6 +143,10 @@ function RootComponent() {
   const { queryClient } = Route.useRouteContext();
   const router = useRouter();
 
+  const [installPrompt, setInstallPrompt] = useState<any>(null);
+  const [showInstallBanner, setShowInstallBanner] = useState(false);
+
+  // 1️⃣ ระบบสแกนเวอร์ชันแอป
   useEffect(() => {
     const currentLocalVersion = localStorage.getItem("app_version");
     
@@ -162,6 +167,32 @@ function RootComponent() {
     }
   }, []);
 
+  // 2️⃣ ระบบ PWA Auto-Install สำหรับ Samsung Tablet & Android
+  useEffect(() => {
+    const handleBeforeInstallPrompt = (e: Event) => {
+      e.preventDefault();
+      setInstallPrompt(e);
+      setShowInstallBanner(true);
+    };
+
+    window.addEventListener("beforeinstallprompt", handleBeforeInstallPrompt);
+
+    return () => {
+      window.removeEventListener("beforeinstallprompt", handleBeforeInstallPrompt);
+    };
+  }, []);
+
+  const handleInstallClick = async () => {
+    if (!installPrompt) return;
+    installPrompt.prompt();
+    const { outcome } = await installPrompt.userChoice;
+    if (outcome === "accepted") {
+      setShowInstallBanner(false);
+      setInstallPrompt(null);
+    }
+  };
+
+  // 3️⃣ ระบบ Auth & ป้องกันล็อกอินซ้อน
   useEffect(() => {
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
       if (event === 'SIGNED_OUT') {
@@ -205,6 +236,35 @@ function RootComponent() {
   return (
     <QueryClientProvider client={queryClient}>
       <Outlet />
+
+      {/* แถบแจ้งเตือนติดตั้งแอปสำหรับ Tablet/Mobile */}
+      {showInstallBanner && (
+        <div className="fixed bottom-4 left-4 right-4 sm:left-auto sm:right-6 z-[999] max-w-md bg-slate-900 text-white p-4 rounded-2xl shadow-2xl border border-slate-700 flex items-center justify-between gap-3 animate-in fade-in slide-in-from-bottom-4">
+          <div className="flex items-center gap-3">
+            <div className="p-2.5 bg-primary/20 text-primary rounded-xl">
+              <Download className="size-5" />
+            </div>
+            <div>
+              <p className="font-bold text-sm">ติดตั้ง Exam Vault ลงเครื่อง</p>
+              <p className="text-xs text-slate-400">เข้าทำข้อสอบได้รวดเร็วเต็มหน้าจอ</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <button
+              onClick={handleInstallClick}
+              className="px-3.5 py-2 bg-primary hover:bg-primary/90 text-white font-bold text-xs rounded-xl shadow-sm transition"
+            >
+              ติดตั้งทันที
+            </button>
+            <button
+              onClick={() => setShowInstallBanner(false)}
+              className="p-1.5 text-slate-400 hover:text-white rounded-lg"
+            >
+              <X className="size-4" />
+            </button>
+          </div>
+        </div>
+      )}
     </QueryClientProvider>
   );
 }
