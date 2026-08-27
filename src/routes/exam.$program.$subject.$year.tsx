@@ -122,13 +122,11 @@ function ExamSessionPage() {
   const [attemptCount, setAttemptCount] = useState<number>(1);
   const [activeResultCard, setActiveResultCard] = useState(0); 
 
-  // State สำหรับ Modal เกียรติบัตร
   const [showCertModal, setShowCertModal] = useState(false);
   const certRef = useRef<HTMLDivElement>(null);
 
   const hasAlerted5Min = useRef(false);
 
-  // States สำหรับระบบ Drag / Swipe & Wheel
   const [isDragging, setIsDragging] = useState(false);
   const [startX, setStartX] = useState(0);
   const [startY, setStartY] = useState(0);
@@ -200,12 +198,13 @@ function ExamSessionPage() {
     return () => window.removeEventListener('beforeunload', handleBeforeUnload);
   }, [userAnswers, isSubmitted]);
 
+  // ✅ ปรับปรุง: เซฟเฉพาะคำตอบและดัชนีข้อลง LocalStorage (ไม่เก็บ questions ทั้งก้อนให้หนักเครื่อง)
   useEffect(() => {
     if (!examData || !student || isSubmitted) return;
-    const storageKey = `exam_save_${examData.id}_student_${student.id}`;
-    const dataToSave = { userAnswers, currentIdx, bookmarkedIndexes, timeLeft, questions };
+    const storageKey = `exam_ans_${examData.id}_student_${student.id}`;
+    const dataToSave = { userAnswers, currentIdx, bookmarkedIndexes, timeLeft };
     localStorage.setItem(storageKey, JSON.stringify(dataToSave));
-  }, [userAnswers, currentIdx, bookmarkedIndexes, timeLeft, examData, student, isSubmitted, questions]);
+  }, [userAnswers, currentIdx, bookmarkedIndexes, timeLeft, examData, student, isSubmitted]);
 
   useEffect(() => {
     fetchSessionAndExam();
@@ -255,75 +254,55 @@ function ExamSessionPage() {
     });
   };
 
+  // ✅ ปรับปรุง: ดึงข้อมูลแบบแม่นยำและโหลดเร็วที่สุด
   const fetchSessionAndExam = async () => {
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session) {
-      alert("กรุณาเข้าสู่ระบบก่อนทำข้อสอบ");
-      navigate({ to: "/login" });
-      return;
-    }
-
-    const { data: studentData } = await supabase.from('students').select('*').eq('email', session.user.email).maybeSingle();
-    
-    const currentStudent = studentData || { 
-      id: session.user.id, 
-      name: session.user.user_metadata?.['name'] || session.user.email?.split('@')[0] || "นักเรียน",
-      email: session.user.email, 
-      examHistory: [], 
-      scores: {} 
-    };
-    setStudent(currentStudent);
-
-    const decodedProgram = decodeURIComponent(program).toLowerCase();
-    const decodedSubject = decodeURIComponent(subject);
-    const dbProgramTarget = DB_PROGRAM_MAP[decodedProgram] || decodedProgram;
-
-    const { data: examList, error } = await supabase
-      .from('exams')
-      .select('*')
-      .ilike('subject', `%${decodedSubject}%`)
-      .eq('year', year)
-      .ilike('program', `%${dbProgramTarget}%`)
-      .eq('status', 'published')
-      .limit(1);
-
-    if (error || !examList || examList.length === 0) {
-      alert("คุณไม่มีสิทธิ์ หรือไม่พบข้อสอบในแผนการเรียนนี้");
-      navigate({ to: "/" });
-      return;
-    }
-
-    const fetchedExam = examList[0];
-    setExamData(fetchedExam);
-    
-    const previousAttempts = (currentStudent.examHistory || []).filter((h: any) => h.exam_id === fetchedExam.id);
-    const currentAttemptNumber = previousAttempts.length + 1;
-    setAttemptCount(currentAttemptNumber);
-
-    const storageKey = `exam_save_${fetchedExam.id}_student_${currentStudent.id}`;
-    const savedData = localStorage.getItem(storageKey);
-
-    if (savedData) {
-      try {
-        const parsed = JSON.parse(savedData);
-        setUserAnswers(parsed.userAnswers || {});
-        setCurrentIdx(parsed.currentIdx || 0);
-        setBookmarkedIndexes(parsed.bookmarkedIndexes || []);
-        if (parsed.questions && parsed.questions.length > 0) {
-          setQuestions(parsed.questions);
-        } else {
-          setQuestions(fetchedExam.questions || []);
-        }
-        if (parsed.timeLeft !== undefined && fetchedExam.is_timed !== false) {
-          setTimeLeft(parsed.timeLeft);
-        } else if (fetchedExam.duration_minutes && fetchedExam.is_timed !== false) {
-          setTimeLeft(Number(fetchedExam.duration_minutes) * 60);
-        }
-      } catch (e) {
-        setQuestions(fetchedExam.questions || []);
-        if (fetchedExam.duration_minutes && fetchedExam.is_timed !== false) setTimeLeft(Number(fetchedExam.duration_minutes) * 60);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) {
+        alert("กรุณาเข้าสู่ระบบก่อนทำข้อสอบ");
+        navigate({ to: "/login" });
+        return;
       }
-    } else {
+
+      const decodedProgram = decodeURIComponent(program).toLowerCase();
+      const decodedSubject = decodeURIComponent(subject);
+      const dbProgramTarget = DB_PROGRAM_MAP[decodedProgram] || decodedProgram;
+
+      // รันดึงข้อมูลนักเรียนและข้อสอบพร้อมกันแบบ Parallel
+      const [studentRes, examRes] = await Promise.all([
+        supabase.from('students').select('id, name, email, examHistory, scores').eq('email', session.user.email).maybeSingle(),
+        supabase.from('exams')
+          .select('id, title, subject, year, program, duration_minutes, is_timed, questions, shuffle_questions')
+          .ilike('subject', `%${decodedSubject}%`)
+          .eq('year', year)
+          .ilike('program', `%${dbProgramTarget}%`)
+          .eq('status', 'published')
+          .limit(1)
+          .maybeSingle()
+      ]);
+
+      const currentStudent = studentRes.data || { 
+        id: session.user.id, 
+        name: session.user.user_metadata?.['name'] || session.user.email?.split('@')[0] || "นักเรียน",
+        email: session.user.email, 
+        examHistory: [], 
+        scores: {} 
+      };
+      setStudent(currentStudent);
+
+      if (examRes.error || !examRes.data) {
+        alert("คุณไม่มีสิทธิ์ หรือไม่พบข้อสอบในแผนการเรียนนี้");
+        navigate({ to: "/" });
+        return;
+      }
+
+      const fetchedExam = examRes.data;
+      setExamData(fetchedExam);
+      
+      const previousAttempts = (currentStudent.examHistory || []).filter((h: any) => h.exam_id === fetchedExam.id);
+      const currentAttemptNumber = previousAttempts.length + 1;
+      setAttemptCount(currentAttemptNumber);
+
       const baseQuestions = fetchedExam.questions || [];
       if (currentAttemptNumber > 1) {
         setQuestions(shuffleQuestionOptions(baseQuestions));
@@ -331,14 +310,39 @@ function ExamSessionPage() {
         setQuestions(baseQuestions);
       }
 
-      if (fetchedExam.duration_minutes && fetchedExam.is_timed !== false) {
+      // ดึงคำตอบเดิมที่บันทึกไว้ในเครื่อง
+      const storageKey = `exam_ans_${fetchedExam.id}_student_${currentStudent.id}`;
+      const savedData = localStorage.getItem(storageKey);
+
+      if (savedData) {
+        try {
+          const parsed = JSON.parse(savedData);
+          setUserAnswers(parsed.userAnswers || {});
+          setCurrentIdx(parsed.currentIdx || 0);
+          setBookmarkedIndexes(parsed.bookmarkedIndexes || []);
+          if (parsed.timeLeft !== undefined && fetchedExam.is_timed !== false) {
+            setTimeLeft(parsed.timeLeft);
+          } else if (fetchedExam.duration_minutes && fetchedExam.is_timed !== false) {
+            setTimeLeft(Number(fetchedExam.duration_minutes) * 60);
+          }
+        } catch (e) {
+          if (fetchedExam.duration_minutes && fetchedExam.is_timed !== false) setTimeLeft(Number(fetchedExam.duration_minutes) * 60);
+        }
+      } else if (fetchedExam.duration_minutes && fetchedExam.is_timed !== false) {
         setTimeLeft(Number(fetchedExam.duration_minutes) * 60);
       }
+    } catch (err) {
+      console.error("Error loading exam session:", err);
     }
   };
 
   if (!examData || !student || questions.length === 0) {
-    return <div className="min-h-screen flex items-center justify-center text-slate-500 font-medium">กำลังเตรียมข้อสอบ...</div>;
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center bg-slate-50 text-slate-500 gap-3">
+        <div className="size-8 border-4 border-primary border-t-transparent rounded-full animate-spin" />
+        <p className="font-bold text-sm">กำลังเปิดชุดข้อสอบ...</p>
+      </div>
+    );
   }
 
   const currentQ = questions[currentIdx];
@@ -457,9 +461,10 @@ function ExamSessionPage() {
         }]);
       }
 
+      // ดึงสถิติคัดกรองเฉพาะตัวเลขคะแนน
       const { data: submissions } = await supabase
         .from('exam_submissions')
-        .select('score, total, percentage')
+        .select('percentage')
         .eq('exam_id', examData.id);
 
       if (submissions && submissions.length > 0) {
@@ -542,12 +547,11 @@ function ExamSessionPage() {
         }).eq("id", student.id);
       }
 
-      localStorage.removeItem(`exam_save_${examData.id}_student_${student.id}`);
+      localStorage.removeItem(`exam_ans_${examData.id}_student_${student.id}`);
       setShowResultModal(true); 
 
     } catch (error) {
       console.error("Error saving exam:", error);
-      alert("บันทึกคะแนนเรียบร้อย และคุณสามารถดูเฉลยได้ทันที");
       setShowResultModal(true); 
     } finally {
       setIsSubmitting(false);
@@ -797,7 +801,7 @@ function ExamSessionPage() {
         </div>
       </div>
 
-      {/* ✅ POPUP RESULT พร้อมรองรับ Scroll Wheel เลื่อนสลับข้อ */}
+      {/* ✅ POPUP RESULT */}
       {showResultModal && examResult && (
         <div 
           className="fixed inset-0 z-[100] flex flex-col lg:flex-row bg-slate-900/95 backdrop-blur-md overflow-hidden p-0 m-0"
@@ -852,7 +856,6 @@ function ExamSessionPage() {
                 )}
               </div>
 
-              {/* ปุ่มรับเกียรติบัตร (ผ่านเกณฑ์ 70% ขึ้นไป) */}
               {examResult.percentage >= 70 && (
                 <button 
                   onClick={() => setShowCertModal(true)}
@@ -871,7 +874,7 @@ function ExamSessionPage() {
             </div>
           </div>
 
-          {/* ➡️ ขวา: Slider เฉลยข้อสอบ (แสดงครบทั้งโจทย์และ Choice ทั้งหมด) */}
+          {/* ➡️ ขวา: Slider เฉลยข้อสอบ */}
           <div 
             className="flex-1 relative flex items-center justify-center h-[65vh] lg:h-full p-4 lg:p-10 select-none z-10"
             onMouseDown={handleDragStart}
@@ -956,7 +959,6 @@ function ExamSessionPage() {
                              </div>
                            )}
 
-                           {/* แสดงรายการ Choice ทั้งหมด */}
                            {d.type === "choice" ? (
                              <div className="space-y-2.5">
                                <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">ตัวเลือกทั้งหมด:</p>
@@ -1044,7 +1046,7 @@ function ExamSessionPage() {
         </div>
       )}
 
-      {/* ✅ Modal: เกียรติบัตรรับรองผลสอบ */}
+      {/* ✅ Modal: เกียรติบัตร */}
       {showCertModal && (
         <div className="fixed inset-0 z-[110] flex items-center justify-center bg-slate-950/80 backdrop-blur-md p-4 animate-in fade-in duration-200">
           <div className="bg-white w-full max-w-3xl rounded-[2.5rem] shadow-2xl flex flex-col overflow-hidden animate-in zoom-in-95">
