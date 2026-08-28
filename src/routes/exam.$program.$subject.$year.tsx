@@ -9,6 +9,11 @@ import {
 import { supabase } from "@/lib/supabase";
 import SignatureCanvas from 'react-signature-canvas';
 
+// อิมพอร์ตระบบสมการคณิตศาสตร์ LaTeX
+import 'katex/dist/katex.min.css';
+// @ts-ignore
+import Latex from 'react-latex-next';
+
 export const Route = createFileRoute("/exam/$program/$subject/$year")({
   component: ExamSessionPage,
 });
@@ -663,7 +668,7 @@ function ExamSessionPage() {
             </div>
 
             <p className={`font-semibold text-slate-800 leading-relaxed mb-6 whitespace-pre-line ${getQuestionFontSize()}`}>
-              {currentQ?.question}
+              <Latex>{String(currentQ?.question || "")}</Latex>
             </p>
 
             {currentQ?.image_url && (
@@ -689,7 +694,7 @@ function ExamSessionPage() {
                       <span className={`size-7 shrink-0 rounded-full flex items-center justify-center text-xs font-bold border ${isSelected ? "bg-primary text-white border-primary" : "border-slate-300"}`}>
                         {choiceLabels[optIdx] || optIdx + 1}
                       </span>
-                      <span className="leading-relaxed">{opt}</span>
+                      <span className="leading-relaxed"><Latex>{String(opt)}</Latex></span>
                     </button>
                   );
                 })}
@@ -945,7 +950,7 @@ function ExamSessionPage() {
                              )}
                            </div>
                            <p className="font-bold text-base sm:text-lg lg:text-xl text-slate-800 leading-relaxed whitespace-pre-line select-text">
-                             {d.question}
+                             <Latex>{String(d.question || "")}</Latex>
                            </p>
                         </div>
 
@@ -986,7 +991,7 @@ function ExamSessionPage() {
                                          <span className={`size-7 rounded-xl flex items-center justify-center text-xs font-black border shrink-0 ${badgeStyle}`}>
                                            {choiceLabels[optIdx] || optIdx + 1}
                                          </span>
-                                         <span className="leading-relaxed">{opt}</span>
+                                         <span className="leading-relaxed"><Latex>{String(opt)}</Latex></span>
                                        </div>
 
                                        {isCorrectChoice && (
@@ -1008,11 +1013,11 @@ function ExamSessionPage() {
                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                                <div className={`p-5 rounded-2xl border shadow-sm ${d.isCorrect ? "bg-emerald-100/40 border-emerald-200 text-emerald-900" : "bg-red-100/40 border-red-200 text-red-900"}`}>
                                  <p className="text-xs font-bold mb-1 opacity-60 uppercase tracking-wider">คำตอบที่คุณเขียน:</p>
-                                 <p className="font-bold leading-relaxed text-base">{d.userAnswer || "ไม่ได้ตอบ"}</p>
+                                 <p className="font-bold leading-relaxed text-base"><Latex>{String(d.userAnswer || "ไม่ได้ตอบ")}</Latex></p>
                                </div>
                                <div className="p-5 rounded-2xl border shadow-sm bg-emerald-50 border-emerald-200 text-emerald-900">
                                  <p className="text-xs font-bold mb-1 opacity-60 uppercase tracking-wider">เฉลยที่ถูกต้อง:</p>
-                                 <p className="font-bold leading-relaxed text-base">{d.correctAnswer}</p>
+                                 <p className="font-bold leading-relaxed text-base"><Latex>{String(d.correctAnswer || "")}</Latex></p>
                                </div>
                              </div>
                            )}
@@ -1022,7 +1027,9 @@ function ExamSessionPage() {
                                <span className="font-bold flex items-center gap-2 text-primary mb-3 text-base">
                                  <Lightbulb className="size-5 text-amber-500" /> วิธีทำอย่างละเอียด:
                                </span>
-                               <div className="whitespace-pre-line leading-loose text-slate-700 text-sm sm:text-base select-text">{d.explanation}</div>
+                               <div className="whitespace-pre-line leading-loose text-slate-700 text-sm sm:text-base select-text">
+                                 <Latex>{String(d.explanation || "")}</Latex>
+                               </div>
                              </div>
                            )}
                         </div>
@@ -1060,6 +1067,7 @@ function ExamSessionPage() {
               </button>
             </div>
 
+            {/* ใบประกาศนียบัตร */}
             <div className="p-8 sm:p-12 overflow-y-auto flex justify-center bg-slate-100/50">
               <div 
                 ref={certRef}

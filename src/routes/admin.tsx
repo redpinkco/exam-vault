@@ -621,11 +621,27 @@ function AdminDashboard() {
     setShowStudentModal(false);
   };
 
-  const handleDeleteStudent = async (id: number) => { 
-    if (confirm("คุณแน่ใจหรือไม่ที่จะลบนักเรียนคนนี้? ข้อมูลและคะแนนสอบทั้งหมดจะหายไปอย่างถาวร!")) { 
-      const { error } = await supabase.from('students').delete().eq('id', id);
-      await supabase.from('exam_submissions').delete().eq('student_id', id);
-      if (!error) { fetchStudents(); if (selectedStudent?.id === id) setSelectedStudent(null); }
+  const handleDeleteStudent = async (student: any) => { 
+    if (confirm(`คุณแน่ใจหรือไม่ที่จะลบนักเรียน (${student.email}) คนนี้? ข้อมูลและคะแนนสอบทั้งหมดจะหายไปอย่างถาวร!`)) { 
+      
+      // 1. ลบออกจากตาราง students
+      const { error: dbError } = await supabase.from('students').delete().eq('id', student.id);
+      await supabase.from('exam_submissions').delete().eq('student_id', student.id);
+      
+      if (!dbError) { 
+        // 2. พยายามลบจาก Auth Users (จำเป็นต้องใช้สิทธิ์ Service Role หรือให้เรียกใช้ข้าม Edge function, ตรงนี้ลองใช้ admin API ถ้าตั้งสิทธิ์ไว้)
+        try {
+            await supabase.auth.admin.deleteUser(student.id); // อาจจะต้องใช้ UID จาก auth ถ้า id ในตารางไม่ตรงกัน
+        } catch (e) {
+            console.log("Auth delete skipped or failed (needs admin privileges)", e);
+        }
+
+        fetchStudents(); 
+        if (selectedStudent?.id === student.id) setSelectedStudent(null); 
+        alert("ลบข้อมูลนักเรียนเรียบร้อยแล้ว");
+      } else {
+        alert("เกิดข้อผิดพลาดในการลบ: " + dbError.message);
+      }
     } 
   };
 
@@ -775,15 +791,44 @@ function AdminDashboard() {
   const removeSubjectiveAnswerLine = (qIndex: number, lineIndex: number) => { setManualQuestions(prev => prev.map((q, i) => { if (i === qIndex) { const currentLines = q.subjective_answers || []; if (currentLines.length <= 1) { alert("ต้องมีอย่างน้อย 1 ช่องคำตอบ"); return q; } return { ...q, subjective_answers: currentLines.filter((_, li) => li !== lineIndex) }; } return q; })); };
   const updateSubjectiveAnswerText = (qIndex: number, lineIndex: number, text: string) => { setManualQuestions(prev => prev.map((q, i) => { if (i === qIndex) { const currentLines = [...(q.subjective_answers || [""])]; currentLines[lineIndex] = text; return { ...q, subjective_answers: currentLines }; } return q; })); };
 
+  const handleAiResultImageUpload = async (index: number, e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files[0]) {
+      setIsUploading(true);
+      try {
+        const file = e.target.files[0];
+        const url = await uploadImageToStorage(file, 'exam-questions');
+        setAiResult(prev => {
+          if (!prev) return prev;
+          return prev.map((q, i) => i === index ? { ...q, image_url: url } : q);
+        });
+      } catch (error) {
+        alert("อัปโหลดรูปภาพไม่สำเร็จ กรุณาลองใหม่");
+        console.error(error);
+      } finally {
+        setIsUploading(false);
+      }
+    }
+  };
+
+  const removeAiResultImage = (index: number) => {
+    setAiResult(prev => {
+      if (!prev) return prev;
+      return prev.map((q, i) => i === index ? { ...q, image_url: q.question.includes("จากรูป") ? "NEEDS_IMAGE" : "" } : q);
+    });
+  };
+
   const urlToBase64 = async (url: string): Promise<string> => {
     const response = await fetch(url);
     const blob = await response.blob();
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
       reader.onloadend = () => {
-        const base64 = reader.result?.toString().split(',')[1];
-        if (base64) resolve(base64);
-        else reject(new Error("แปลงไฟล์ไม่สำเร็จ"));
+        const resString = reader.result as string;
+        if (resString && resString.includes(',')) {
+          resolve(resString.split(',')[1] || "");
+        } else {
+          reject(new Error("แปลงไฟล์ไม่สำเร็จ"));
+        }
       };
       reader.onerror = reject;
       reader.readAsDataURL(blob);
@@ -798,7 +843,10 @@ function AdminDashboard() {
     try {
       const base64Data = await new Promise<string>((resolve, reject) => {
         const reader = new FileReader();
-        reader.onloadend = () => resolve(reader.result?.toString().split(',')[1] || "");
+        reader.onloadend = () => {
+          const resString = reader.result as string;
+          resolve(resString && resString.includes(',') ? resString.split(',')[1] || "" : "");
+        };
         reader.onerror = reject;
         reader.readAsDataURL(file);
       });
@@ -813,9 +861,11 @@ function AdminDashboard() {
   "explanation": "เฉลยวิธีทำ (ถ้ามีในรูป)"
 }
 คำแนะนำสำคัญ (ข้อควรระวัง): 
-1. ในฟิลด์ options ให้ใส่เฉพาะ "เนื้อหาคำตอบ" เท่านั้น ห้ามใส่ ก. ข. ค. ง. จ. นำหน้าเด็ดขาด!
-2. หากโจทย์มีสัญลักษณ์ทางคณิตศาสตร์ ให้ใช้สัญลักษณ์ตามนี้แทน ห้ามใช้ LaTeX หรือ $: มุมพิมพ์ ∠, องศาพิมพ์ °, ขนานพิมพ์ //, เศษส่วนพิมพ์ 1/2 หรือ ½, ยกกำลังพิมพ์ ^2 หรือ ²
-3. ตอบกลับมาเป็นโครงสร้าง JSON เพียวๆ เท่านั้น ห้ามมีคำอธิบายเพิ่มเติม`;
+1. ในฟิลด์ options ให้ใส่เฉพาะเนื้อหาคำตอบ ห้ามใส่ ก. ข. ค. ง. จ. นำหน้า
+2. อนุญาตให้ใช้โค้ด LaTeX สำหรับเศษส่วน \\frac{1}{2}, รูท \\sqrt{2}, พาย \\pi แต่สำหรับ "เลขยกกำลัง" ห้ามใช้เครื่องหมาย ^ เด็ดขาด ให้พิมพ์เป็นตัวเลขยกกำลัง (Superscript) แทน เช่น 10³, 2⁵, x²
+3. ระวังเรื่องสัญลักษณ์องศา (°) ห้ามมองเป็นยกกำลังศูนย์ (^0) เด็ดขาด ให้พิมพ์สัญลักษณ์ ° ธรรมดา หรือ LaTeX $^\\circ$
+4. ตอบกลับมาเป็นโครงสร้าง JSON เพียวๆ เท่านั้น ห้ามมีคำอธิบายเพิ่มเติม
+5. สำคัญมาก: ห้าม AI คิดไปเองหรือพยายามแก้ไขตัวเลขในโจทย์ (เช่น การเดาลำดับอนุกรม) ให้ดึงตัวเลขและข้อความตามที่เห็นในรูปภาพเป๊ะๆ 100% แม้ว่าโจทย์ในรูปจะดูเหมือนพิมพ์ผิดก็ตาม`;
 
       const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
       if (!apiKey) throw new Error("ไม่พบ API Key กรุณาตรวจสอบไฟล์ .env");
@@ -877,10 +927,10 @@ function AdminDashboard() {
 
       if (q.type === "choice") {
         const correctAns = q.options[q.correct_index || 0];
-        promptText = `ในฐานะครูผู้เชี่ยวชาญ จงเขียนอธิบายเฉลยและวิธีทำอย่างละเอียดสำหรับโจทย์ข้อนี้\nโจทย์: ${questionText}\nตัวเลือก: ${q.options.join(", ")}\nคำตอบที่ถูกต้องคือ: ${correctAns}\nอธิบายทีละขั้นตอนให้เด็กเข้าใจง่าย ไม่ต้องเกริ่นนำ ให้พิมพ์เนื้อหาคำอธิบายได้เลย\n\nคำแนะนำสำคัญ: ห้ามใช้โค้ด LaTeX หรือเครื่องหมาย $ ในการเขียนสมการเด็ดขาด ให้พิมพ์เป็นข้อความธรรมดา หรือสัญลักษณ์แบบ Unicode แทน (เช่น เศษส่วนพิมพ์ 1/2, ยกกำลังพิมพ์ ^2, องศาพิมพ์ °, ขนานพิมพ์ //) เครื่องหมายคูณให้ใช้ตัว x เล็ก`;
+        promptText = `ในฐานะครูผู้เชี่ยวชาญ จงเขียนอธิบายเฉลยและวิธีทำอย่างละเอียดสำหรับโจทย์ข้อนี้\nโจทย์: ${questionText}\nตัวเลือก: ${q.options.join(", ")}\nคำตอบที่ถูกต้องคือ: ${correctAns}\nอธิบายทีละขั้นตอนให้เด็กเข้าใจง่าย ไม่ต้องเกริ่นนำ ให้พิมพ์เนื้อหาคำอธิบายได้เลย\n\nคำแนะนำสำคัญ: อนุญาตให้ใช้โค้ด LaTeX สำหรับเศษส่วน \\frac{1}{2}, รูท \\sqrt{2}, พาย \\pi แต่สำหรับ "เลขยกกำลัง" ห้ามใช้เครื่องหมาย ^ เด็ดขาด ให้พิมพ์เป็นตัวเลขยกกำลัง (Superscript) แทน เช่น 10³, 2⁵, x² สัญลักษณ์องศาใช้ ° และเครื่องหมายคูณให้ใช้ \\times หรือ x เล็ก`;
       } else {
         const correctAns = (q.subjective_answers || []).join(", ");
-        promptText = `ในฐานะครูผู้เชี่ยวชาญ จงเขียนอธิบายเฉลยและวิธีทำอย่างละเอียดสำหรับโจทย์ข้อนี้\nโจทย์: ${questionText}\nคำตอบที่ถูกต้องคือ: ${correctAns}\nอธิบายทีละขั้นตอนให้เด็กเข้าใจง่าย ไม่ต้องเกริ่นนำ ให้พิมพ์เนื้อหาคำอธิบายได้เลย\n\nคำแนะนำสำคัญ: ห้ามใช้โค้ด LaTeX หรือเครื่องหมาย $ ในการเขียนสมการเด็ดขาด ให้พิมพ์เป็นข้อความธรรมดา หรือสัญลักษณ์แบบ Unicode แทน (เช่น เศษส่วนพิมพ์ 1/2, ยกกำลังพิมพ์ ^2, องศาพิมพ์ °, ขนานพิมพ์ //) เครื่องหมายคูณให้ใช้ตัว x เล็ก`;
+        promptText = `ในฐานะครูผู้เชี่ยวชาญ จงเขียนอธิบายเฉลยและวิธีทำอย่างละเอียดสำหรับโจทย์ข้อนี้\nโจทย์: ${questionText}\nคำตอบที่ถูกต้องคือ: ${correctAns}\nอธิบายทีละขั้นตอนให้เด็กเข้าใจง่าย ไม่ต้องเกริ่นนำ ให้พิมพ์เนื้อหาคำอธิบายได้เลย\n\nคำแนะนำสำคัญ: อนุญาตให้ใช้โค้ด LaTeX สำหรับเศษส่วน \\frac{1}{2}, รูท \\sqrt{2}, พาย \\pi แต่สำหรับ "เลขยกกำลัง" ห้ามใช้เครื่องหมาย ^ เด็ดขาด ให้พิมพ์เป็นตัวเลขยกกำลัง (Superscript) แทน เช่น 10³, 2⁵, x² สัญลักษณ์องศาใช้ ° และเครื่องหมายคูณให้ใช้ \\times หรือ x เล็ก`;
       }
 
       const requestParts: any[] = [{ text: promptText }];
@@ -958,11 +1008,12 @@ function AdminDashboard() {
   "explanation": "เขียนคำอธิบายเฉลยและวิธีทำอย่างละเอียด แสดงขั้นตอนการคิดคำนวณ สูตร หรือเหตุผลอย่างชัดเจน"
 }
 คำแนะนำสำคัญ (ข้อควรระวัง): 
-1. ในฟิลด์ options ให้ใส่เฉพาะ "เนื้อหาคำตอบ" เท่านั้น ห้ามใส่ตัวอักษร ก. ข. ค. ง. จ. นำหน้าเด็ดขาด!
-2. หากโจทย์ข้อนั้นมี "รูปภาพเรขาคณิต" ประกอบโจทย์ หรือในโจทย์มีคำว่า "จากรูป" ให้ใส่ค่าในฟิลด์ image_url เป็น "NEEDS_IMAGE" เพื่อแจ้งเตือนระบบ
-3. หากเฉลยในรูปมีการโยงลูกศรแบบรูปภาพ ให้เขียนอธิบายเป็น text ในช่อง explanation แทนการแปลงเป็นเครื่องหมายแปลกๆ
-4. ตอบกลับมาเป็นโครงสร้าง JSON เพียวๆ เท่านั้น ห้ามใส่ markdown code block
-5. ห้ามใช้โค้ด LaTeX หรือสัญลักษณ์ $ ในการเขียนสมการเด็ดขาด ให้พิมพ์เป็นข้อความธรรมดา หรือสัญลักษณ์แบบ Unicode แทน (เช่น เศษส่วนพิมพ์ 1/2, ยกกำลังพิมพ์ ^2, องศาพิมพ์ °, ขนานพิมพ์ //)`;
+1. ในฟิลด์ options ให้ใส่เฉพาะเนื้อหาคำตอบ ห้ามใส่ ก. ข. ค. ง. จ. นำหน้า
+2. หากโจทย์มีคำว่า "จากรูป" หรือเป็นเรขาคณิต ให้ตั้ง image_url เป็น "NEEDS_IMAGE"
+3. อนุญาตให้ใช้โค้ด LaTeX สำหรับเศษส่วน \\frac{1}{2}, รูท \\sqrt{2}, พาย \\pi แต่สำหรับ "เลขยกกำลัง" ห้ามใช้เครื่องหมาย ^ เด็ดขาด ให้พิมพ์เป็นตัวเลขยกกำลัง (Superscript) แทน เช่น 10³, 2⁵, x²
+4. ระวังเรื่องสัญลักษณ์องศา (°) ห้ามมองเป็นยกกำลังศูนย์ (^0) เด็ดขาด ให้พิมพ์สัญลักษณ์ ° ธรรมดา หรือ LaTeX $^\\circ$
+5. ตอบเป็น JSON เพียวๆ เท่านั้น ห้ามใส่ markdown code block
+6. สำคัญมาก: ห้าม AI คิดไปเองหรือพยายามแก้ไขตัวเลขในโจทย์ (เช่น การเดาลำดับอนุกรม) ให้ดึงตัวเลขและข้อความตามที่เห็นในรูปภาพเป๊ะๆ 100% แม้ว่าโจทย์ในรูปจะดูเหมือนพิมพ์ผิดก็ตาม`;
 
       const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
       if (!apiKey) throw new Error("ไม่พบ API Key กรุณาตรวจสอบไฟล์ .env");
@@ -2732,9 +2783,11 @@ function AdminDashboard() {
             <div className="flex-1 overflow-y-auto space-y-4 pr-2 custom-scrollbar">
               {aiResult && aiResult.map((q, idx) => (
                 <div key={idx} className={`border rounded-2xl p-4 space-y-2.5 ${q.image_url === "NEEDS_IMAGE" ? "bg-red-50/50 border-red-200" : "bg-slate-50/50 border-slate-200"}`}>
+                  
+                  {/* แสดงแจ้งเตือนกรณีต้องใช้รูป */}
                   {q.image_url === "NEEDS_IMAGE" && (
                     <div className="flex items-center gap-2 text-red-600 bg-red-100 px-3.5 py-1.5 rounded-xl text-[11px] font-bold mb-1 w-fit">
-                      <AlertTriangle className="size-3.5" /> ข้อนี้ต้องอัปโหลดรูปภาพ! (เพิ่มรูปในโหมดแก้ไข)
+                      <AlertTriangle className="size-3.5" /> ข้อนี้ต้องอัปโหลดรูปภาพ! (กรุณาอัปโหลดด้านล่าง)
                     </div>
                   )}
 
@@ -2744,6 +2797,26 @@ function AdminDashboard() {
                       {q.type === "subjective" ? "อัตนัย (เขียนตอบ)" : "ปรนัย (ช้อยส์)"}
                     </span>
                   </div>
+
+                  {/* -- เริ่มส่วนของการแสดง/อัปโหลดรูปภาพในหน้า AI Result -- */}
+                  <div className={`mt-2 p-3 rounded-xl border relative ${q.image_url === "NEEDS_IMAGE" ? "bg-red-50 border-red-200 border-dashed" : "bg-white border-slate-200"}`}>
+                    <label className={`text-[11px] font-bold flex items-center gap-1.5 mb-2 ${q.image_url === "NEEDS_IMAGE" ? "text-red-600" : "text-slate-600"}`}>
+                      <ImageIcon className={`size-3.5 ${q.image_url === "NEEDS_IMAGE" ? "text-red-500" : "text-primary"}`} /> รูปภาพประกอบโจทย์
+                    </label>
+                    {q.image_url && q.image_url !== "NEEDS_IMAGE" ? (
+                      <div className="relative inline-block border rounded-xl overflow-hidden bg-slate-50 shadow-sm">
+                        <img src={q.image_url} alt="Question Attachment" className="max-h-32 object-contain" />
+                        <button onClick={() => removeAiResultImage(idx)} className="absolute top-1 right-1 bg-red-500 text-white p-1 rounded-full hover:bg-red-600 shadow"><X className="size-3" /></button>
+                      </div>
+                    ) : (
+                      <label className={`flex items-center gap-2 px-3 py-2 bg-slate-50 border border-dashed rounded-xl hover:bg-slate-100 text-[11px] font-bold w-fit ${isUploading ? "cursor-wait opacity-50" : "cursor-pointer"} ${q.image_url === "NEEDS_IMAGE" ? "border-red-400 text-red-600" : "border-slate-300 text-slate-500"}`}>
+                        {isUploading ? <Loader2 className="size-3.5 animate-spin text-primary" /> : <UploadCloud className={`size-3.5 ${q.image_url === "NEEDS_IMAGE" ? "text-red-500" : "text-slate-400"}`} />}
+                        {isUploading ? "กำลังอัปโหลด..." : q.image_url === "NEEDS_IMAGE" ? "คลิกอัปโหลดรูปภาพด่วน!" : "อัปโหลดรูปภาพโจทย์ (ถ้ามี)"}
+                        <input type="file" accept="image/*" className="hidden" disabled={isUploading} onChange={(e) => handleAiResultImageUpload(idx, e)} />
+                      </label>
+                    )}
+                  </div>
+                  {/* -- สิ้นสุดส่วนของการอัปโหลดรูปภาพ -- */}
 
                   {q.type === "choice" ? (
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pl-4 mt-2">

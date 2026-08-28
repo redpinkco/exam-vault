@@ -8,6 +8,11 @@ import {
   Check, Filter, Award, Download, Printer, ExternalLink, Sparkles
 } from "lucide-react";
 
+// อิมพอร์ตระบบสมการคณิตศาสตร์
+import 'katex/dist/katex.min.css';
+// @ts-ignore
+import Latex from 'react-latex-next';
+
 export const Route = createFileRoute("/history")({
   component: HistoryPage,
 });
@@ -279,7 +284,7 @@ function HistoryPage() {
                           <span className="text-xs font-semibold text-slate-500 line-clamp-1">{m.exam_title}</span>
                         </div>
                         <p className="font-bold text-slate-800 text-sm sm:text-base leading-relaxed line-clamp-2">
-                          ข้อ {m.qIndex + 1}. {m.question}
+                          ข้อ {m.qIndex + 1}. <Latex>{m.question}</Latex>
                         </p>
                       </div>
                       <button
@@ -478,7 +483,7 @@ function HistoryPage() {
                               </span>
                             </div>
                             <p className="font-bold text-slate-800 text-base sm:text-lg leading-relaxed whitespace-pre-line">
-                              {item.question}
+                              <Latex>{item.question}</Latex>
                             </p>
                           </div>
 
@@ -524,7 +529,7 @@ function HistoryPage() {
                                       <span className={`size-7 rounded-xl flex items-center justify-center text-xs font-black shrink-0 ${badgeStyle}`}>
                                         {choiceLabels[optIdx] || optIdx + 1}
                                       </span>
-                                      <span className="leading-relaxed">{opt}</span>
+                                      <span className="leading-relaxed"><Latex>{opt}</Latex></span>
                                     </div>
 
                                     {isCorrectChoice && (
@@ -547,12 +552,12 @@ function HistoryPage() {
                             {!item.isCorrect && (
                               <div className="bg-rose-50 border border-rose-200 p-4 rounded-2xl text-rose-900">
                                 <p className="text-xs font-bold opacity-60 uppercase mb-1">คำตอบที่คุณพิมพ์:</p>
-                                <p className="text-base font-black">{item.userGivenAnswer || "ไม่ได้ตอบ"}</p>
+                                <p className="text-base font-black"><Latex>{item.userGivenAnswer || "ไม่ได้ตอบ"}</Latex></p>
                               </div>
                             )}
                             <div className="bg-emerald-50 border border-emerald-200 p-4 rounded-2xl text-emerald-900">
                               <p className="text-xs font-bold opacity-60 uppercase mb-1">คำตอบที่ถูกต้อง:</p>
-                              <p className="text-base font-black">{(item.subjective_answers || []).join(" หรือ ")}</p>
+                              <p className="text-base font-black"><Latex>{(item.subjective_answers || []).join(" หรือ ")}</Latex></p>
                             </div>
                           </div>
                         )}
@@ -562,7 +567,7 @@ function HistoryPage() {
                             <p className="font-bold text-primary flex items-center gap-2 text-base">
                               <Lightbulb className="size-5 text-amber-500"/> วิธีทำอย่างละเอียด:
                             </p>
-                            <p className="whitespace-pre-line leading-relaxed text-slate-600 pl-7">{item.explanation}</p>
+                            <p className="whitespace-pre-line leading-relaxed text-slate-600 pl-7"><Latex>{item.explanation}</Latex></p>
                           </div>
                         )}
                       </div>
@@ -675,7 +680,7 @@ function HistoryPage() {
             </div>
 
             <div className="my-6 overflow-y-auto space-y-4 custom-scrollbar pr-2 flex-1">
-              <p className="text-base sm:text-lg font-bold text-slate-800 leading-relaxed whitespace-pre-line">{retryModalItem.question}</p>
+              <p className="text-base sm:text-lg font-bold text-slate-800 leading-relaxed whitespace-pre-line"><Latex>{retryModalItem.question}</Latex></p>
 
               {retryModalItem.question_data?.image_url && retryModalItem.question_data.image_url !== "NEEDS_IMAGE" && (
                 <div className="my-3 flex justify-center"><img src={retryModalItem.question_data.image_url} alt="Question" className="max-h-48 object-contain rounded-2xl border p-2 bg-white shadow-sm" /></div>
@@ -688,7 +693,7 @@ function HistoryPage() {
                     return (
                       <button key={optIdx} onClick={() => { setRetryAnswer(optIdx); setRetryStatus("idle"); }} className={`w-full p-4 rounded-2xl border text-left text-sm font-semibold transition-all flex items-center gap-3.5 ${isSelected ? "border-primary bg-primary/10 text-primary font-bold ring-2 ring-primary shadow-sm" : "border-slate-200/80 bg-white/70 hover:bg-white text-slate-700 shadow-sm"}`}>
                         <span className={`size-7 shrink-0 rounded-xl flex items-center justify-center text-xs font-black border ${isSelected ? "bg-primary text-white border-primary" : "bg-slate-100 text-slate-600 border-slate-200"}`}>{choiceLabels[optIdx] || optIdx + 1}</span>
-                        <span className="leading-relaxed">{opt}</span>
+                        <span className="leading-relaxed"><Latex>{opt}</Latex></span>
                       </button>
                     );
                   })}
@@ -703,7 +708,7 @@ function HistoryPage() {
               {retryStatus === "correct" && <div className="p-4 rounded-2xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs sm:text-sm font-bold flex items-center gap-2.5 animate-in slide-in-from-top-2"><CheckCircle2 className="size-5 text-emerald-600 shrink-0" /><span>ยอดเยี่ยมมาก! คุณตอบถูกต้องแล้ว</span></div>}
               {retryStatus === "wrong" && <div className="p-4 rounded-2xl bg-rose-50 border border-rose-200 text-rose-800 text-xs sm:text-sm font-bold flex items-center gap-2.5 animate-in shake"><XCircle className="size-5 text-rose-600 shrink-0" /><span>ยังไม่ถูกต้อง ลองใหม่อีกครั้งครับ!</span></div>}
               {retryStatus === "correct" && retryModalItem.explanation && (
-                <div className="p-4 bg-slate-50 rounded-2xl border text-xs sm:text-sm text-slate-700 space-y-1.5 animate-in fade-in"><p className="font-bold text-amber-600 flex items-center gap-1.5"><Lightbulb className="size-4" /> วิธีทำ:</p><p className="whitespace-pre-line text-slate-600 leading-relaxed">{retryModalItem.explanation}</p></div>
+                <div className="p-4 bg-slate-50 rounded-2xl border text-xs sm:text-sm text-slate-700 space-y-1.5 animate-in fade-in"><p className="font-bold text-amber-600 flex items-center gap-1.5"><Lightbulb className="size-4" /> วิธีทำ:</p><p className="whitespace-pre-line text-slate-600 leading-relaxed"><Latex>{retryModalItem.explanation}</Latex></p></div>
               )}
             </div>
 
