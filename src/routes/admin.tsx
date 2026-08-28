@@ -1,5 +1,5 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { 
   LayoutDashboard, BookOpen, Users, PlusCircle, Edit, 
   Trash2, UploadCloud, FileText, X, BarChart3, Mail, Lock, Save, History, 
@@ -47,6 +47,9 @@ function AdminDashboard() {
   const navigate = useNavigate(); 
   const [isAuthChecking, setIsAuthChecking] = useState(true);
   
+  // ตัวแปรสำหรับหยุดการเด้งออกเวลา Admin กดสร้าง User ใหม่
+  const isAuthAction = useRef(false);
+
   const [activeTab, setActiveTab] = useState<"dashboard" | "lessons" | "exams" | "trash_exams" | "analytics" | "bulk_exam" | "users" | "worksheets" | "codes" | "reports">("exams");
 
   // State: นักเรียน
@@ -156,6 +159,8 @@ function AdminDashboard() {
     checkAuthAndFetch();
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (isAuthAction.current) return; // ข้ามการเปลี่ยนหน้า หากแอดมินกำลังสร้างบัญชีนักเรียน
+
       if (!session?.user?.email) {
         navigate({ to: "/login" });
       } else {
@@ -424,10 +429,11 @@ function AdminDashboard() {
     if (!file) return;
     if (!confirm("โครงสร้างไฟล์ CSV ต้องมีคอลัมน์: email, password, name, phone\n(รหัสผ่านถ้าเว้นว่าง ระบบจะตั้งให้เป็น 12345678 อัตโนมัติ)\n\nคุณแน่ใจหรือไม่ที่จะเริ่มนำเข้านักเรียน?")) { e.target.value = ""; return; }
     
-    setIsImporting(true);
     Papa.parse(file, {
       header: true, skipEmptyLines: true,
       complete: async (results: any) => {
+        setIsImporting(true);
+        isAuthAction.current = true; // หยุด Redirect
         const rows = results.data as any[];
         let successCount = 0; let failCount = 0;
         const { data: { session: adminSession } } = await supabase.auth.getSession();
@@ -447,6 +453,7 @@ function AdminDashboard() {
         }
         if (adminSession) await supabase.auth.setSession({ access_token: adminSession.access_token, refresh_token: adminSession.refresh_token });
         
+        isAuthAction.current = false; // ปลดการบล็อก Redirect
         alert(`กระบวนการนำเข้าเสร็จสิ้น!\n✅ นำเข้าสำเร็จ: ${successCount} คน\n❌ ล้มเหลว/อีเมลซ้ำ: ${failCount} คน`);
         setIsImporting(false); fetchStudents(); e.target.value = "";
       },
@@ -596,10 +603,18 @@ function AdminDashboard() {
       if (error) alert("เกิดข้อผิดพลาดในการอัปเดต: " + error.message);
       else { alert("อัปเดตข้อมูลและสิทธิ์นักเรียนสำเร็จ!"); fetchStudents(); if (selectedStudent?.id === formData.id) setSelectedStudent({ ...selectedStudent, ...formData }); }
     } else {
+      isAuthAction.current = true; // หยุด Redirect
       const { data: { session: adminSession } } = await supabase.auth.getSession();
       const { error: authError } = await supabase.auth.signUp({ email: formData.email, password: formData.password });
-      if (authError) return alert("ไม่สามารถสร้างบัญชีได้: " + authError.message);
+      
+      if (authError) {
+        isAuthAction.current = false;
+        return alert("ไม่สามารถสร้างบัญชีได้: " + authError.message);
+      }
+      
       if (adminSession) await supabase.auth.setSession({ access_token: adminSession.access_token, refresh_token: adminSession.refresh_token });
+      isAuthAction.current = false; // ปลดบล็อก Redirect
+      
       const { error } = await supabase.from('students').insert([{ name: formData.name, email: formData.email, phone: formData.phone, is_active: true, permissions: formData.permissions, scores: { math: 0, english: 0, science: 0, thai: 0, social: 0 }, examHistory: [] }]);
       if (error) alert("เกิดข้อผิดพลาด: " + error.message); else { alert("สร้างบัญชีนักเรียนสำเร็จ!"); fetchStudents(); }
     }
@@ -766,12 +781,9 @@ function AdminDashboard() {
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
       reader.onloadend = () => {
-        const resString = reader.result as string;
-        if (resString && resString.includes(',')) {
-          resolve(resString.split(',')[1] || "");
-        } else {
-          reject(new Error("แปลงไฟล์ไม่สำเร็จ"));
-        }
+        const base64 = reader.result?.toString().split(',')[1];
+        if (base64) resolve(base64);
+        else reject(new Error("แปลงไฟล์ไม่สำเร็จ"));
       };
       reader.onerror = reject;
       reader.readAsDataURL(blob);
@@ -786,10 +798,7 @@ function AdminDashboard() {
     try {
       const base64Data = await new Promise<string>((resolve, reject) => {
         const reader = new FileReader();
-        reader.onloadend = () => {
-          const resString = reader.result as string;
-          resolve(resString && resString.includes(',') ? resString.split(',')[1] || "" : "");
-        };
+        reader.onloadend = () => resolve(reader.result?.toString().split(',')[1] || "");
         reader.onerror = reject;
         reader.readAsDataURL(file);
       });
@@ -811,7 +820,7 @@ function AdminDashboard() {
       const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
       if (!apiKey) throw new Error("ไม่พบ API Key กรุณาตรวจสอบไฟล์ .env");
 
-      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key=${apiKey}`, { 
+      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`, { 
         method: "POST", 
         headers: { "Content-Type": "application/json" }, 
         body: JSON.stringify({ contents: [{ parts: [{ text: promptText }, { inline_data: { mime_type: "image/jpeg", data: base64Data } }] }] }) 
@@ -891,7 +900,7 @@ function AdminDashboard() {
       const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
       if (!apiKey) throw new Error("ไม่พบ API Key กรุณาตรวจสอบไฟล์ .env");
 
-      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key=${apiKey}`, { 
+      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`, { 
         method: "POST", 
         headers: { "Content-Type": "application/json" }, 
         body: JSON.stringify({ contents: [{ parts: requestParts }] }) 
@@ -958,7 +967,7 @@ function AdminDashboard() {
       const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
       if (!apiKey) throw new Error("ไม่พบ API Key กรุณาตรวจสอบไฟล์ .env");
 
-      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key=${apiKey}`, { 
+      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`, { 
         method: "POST", 
         headers: { "Content-Type": "application/json" }, 
         body: JSON.stringify({ contents: [{ parts: [{ text: promptText }, ...imageParts] }] }) 
@@ -1855,7 +1864,7 @@ function AdminDashboard() {
                                 <ShieldAlert className="size-3.5"/>
                               </button>
                               <button onClick={() => handleOpenEditStudent(s)} className="p-1.5 text-slate-400 hover:text-primary border rounded-xl bg-white shadow-sm" title="แก้ไขโปรไฟล์"><Edit className="size-3.5"/></button>
-                              <button onClick={() => handleDeleteStudent(s.id)} className="p-1.5 text-slate-400 hover:text-red-500 border rounded-xl bg-white shadow-sm" title="ลบบัญชี"><Trash2 className="size-3.5"/></button>
+                              <button onClick={() => handleDeleteStudent(s)} className="p-1.5 text-slate-400 hover:text-red-500 border rounded-xl bg-white shadow-sm" title="ลบบัญชี"><Trash2 className="size-3.5"/></button>
                             </div>
                           </td>
                         </tr>
@@ -1890,7 +1899,7 @@ function AdminDashboard() {
                     <div className="flex gap-2">
                       <button onClick={() => handleResetStudentData(selectedStudent)} className="p-2 text-slate-500 hover:text-amber-600 bg-slate-50 hover:bg-amber-50 rounded-2xl transition-colors border shadow-sm" title="รีเซ็ตผลสอบคนนี้"><RefreshCw className="size-4"/></button>
                       <button onClick={() => handleOpenEditStudent(selectedStudent)} className="p-2 text-slate-500 hover:text-primary bg-slate-50 hover:bg-primary/10 rounded-2xl transition-colors border shadow-sm" title="แก้ไขข้อมูลและสิทธิ์"><Edit className="size-4"/></button>
-                      <button onClick={() => handleDeleteStudent(selectedStudent.id)} className="p-2 text-slate-500 hover:text-red-500 bg-slate-50 hover:bg-red-50 rounded-2xl transition-colors border shadow-sm" title="ลบนักเรียนคนนี้"><Trash2 className="size-4"/></button>
+                      <button onClick={() => handleDeleteStudent(selectedStudent)} className="p-2 text-slate-500 hover:text-red-500 bg-slate-50 hover:bg-red-50 rounded-2xl transition-colors border shadow-sm" title="ลบนักเรียนคนนี้"><Trash2 className="size-4"/></button>
                     </div>
                   </div>
 
@@ -2309,7 +2318,7 @@ function AdminDashboard() {
 
       {/* Modal: Exam Info */}
       {examModalMode === "exam_info" && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm px-4">
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 backdrop-blur-sm px-4">
           <div className="w-full max-w-lg rounded-3xl bg-white p-8 shadow-2xl animate-in zoom-in-95 duration-200">
             <div className="flex justify-between mb-6 border-b pb-3">
               <h2 className="text-xl font-bold text-slate-800">{editingExamId ? "แก้ไขข้อมูลชุดข้อสอบ" : "1. ข้อมูลชุดข้อสอบ"}</h2>
@@ -2424,7 +2433,7 @@ function AdminDashboard() {
 
       {/* Modal: Select Add Question Method */}
       {examModalMode === "select" && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm px-4">
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 backdrop-blur-sm px-4">
           <div className="w-full max-w-xl rounded-3xl bg-white p-8 shadow-2xl animate-in fade-in slide-in-from-right-4">
             <div className="flex gap-3 mb-6 border-b pb-4"><button onClick={() => setExamModalMode("exam_info")} className="p-2"><ChevronLeft/></button><div><h2 className="text-xl font-bold text-slate-800">2. นำเข้าข้อคำถาม</h2><p className="text-xs text-slate-500">{newExamInfo.title}</p></div></div>
             <div className="grid gap-5 sm:grid-cols-2">
@@ -2437,7 +2446,7 @@ function AdminDashboard() {
 
       {/* Modal: Manual Questions Editor */}
       {examModalMode === "manual" && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm px-4">
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 backdrop-blur-sm px-4 py-10">
           <div className="w-full max-w-4xl max-h-[90vh] flex flex-col rounded-3xl bg-white p-7 shadow-2xl animate-in fade-in">
             <div className="flex flex-col border-b pb-4 mb-4 gap-3">
               <div className="flex items-start justify-between">
@@ -2686,7 +2695,7 @@ function AdminDashboard() {
 
       {/* Modal: AI Scan Images */}
       {examModalMode === "ai" && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm px-4">
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 backdrop-blur-sm px-4">
           <div className="w-full max-w-2xl rounded-3xl bg-white p-8 shadow-2xl animate-in fade-in slide-in-from-right-4">
             <div className="flex gap-3 mb-6"><button onClick={() => setExamModalMode("select")} className="p-2"><ChevronLeft/></button><h2 className="text-xl font-bold flex items-center gap-2"><Sparkles className="size-5 text-primary"/> เลือกรูปภาพข้อสอบที่ต้องการสแกน</h2></div>
             {previewImages.length === 0 ? (
@@ -2713,7 +2722,7 @@ function AdminDashboard() {
 
       {/* Modal: AI Result Editor */}
       {examModalMode === "ai_result" && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm px-4">
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 backdrop-blur-sm px-4">
           <div className="w-full max-w-3xl max-h-[90vh] flex flex-col rounded-3xl bg-white p-7 shadow-2xl animate-in zoom-in-95">
             <div className="flex justify-between mb-4 border-b pb-3">
               <div className="flex items-center gap-2"><Sparkles className="size-5 text-green-500"/><h2 className="text-xl font-bold text-slate-800">ผลลัพธ์จาก AI ({aiResult?.length || 0} ข้อ)</h2></div>
